@@ -4,7 +4,7 @@
 
   <groupId>com.h2database</groupId>
   <artifactId>h2</artifactId>
-  <version>1.4.200-SNAPSHOT</version>
+    <version>1.4.200-RADIUMSPECIAL</version>
   <packaging>jar</packaging>
   <name>H2 Database Engine</name>
   <url>http://www.h2database.com</url>
@@ -44,7 +44,20 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
-  <dependencies>
+    <distributionManagement>
+        <repository>
+            <id>central</id>
+            <name>libs-release-local</name>
+            <url>http://artifactory.radium.co.nz:8081/artifactory/libs-release-local</url>
+        </repository>
+        <snapshotRepository>
+            <id>snapshots</id>
+            <name>libs-snapshot-local</name>
+            <url>http://artifactory.radium.co.nz/artifactory/libs-snapshot-local</url>
+        </snapshotRepository>
+    </distributionManagement>
+
+    <dependencies>
 
     <!-- START COMPILE DEPENDENCIES !-->
     <dependency>
@@ -200,8 +213,21 @@
       </includes>
     </testResource>
     </testResources>
-    <plugins>
-      <plugin>
+      <plugins>
+          <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-source-plugin</artifactId>
+              <version>2.1.2</version>
+              <executions>
+                  <execution>
+                      <id>attach-sources</id>
+                      <goals>
+                          <goal>jar</goal>
+                      </goals>
+                  </execution>
+              </executions>
+          </plugin>
+          <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.1.0</version>
@@ -238,7 +264,8 @@
           </execution>
         </executions>
       </plugin>
-      <!-- Make sure neither we nor one of our dependencies uses anything outside JDK 1.7 -->
+
+          <!-- Make sure neither we nor one of our dependencies uses anything outside JDK 1.7 -->
 <!-- commented out for now because it fails to build under JDK1.8+ because we are manually adding the tools jar
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

@@ -673,6 +673,31 @@ public class Parser {
     }
 
     /**
+     * To quickly support the execution of SQL prepared statements on SQL Server, replace
+     * <code>/*H2SP**&#47;</code> with the word <code>CALL </code> (and a space), then remove all instances of /** and
+     * **&#47; from the rest of the SQL. These comments should be used to add <code>(</code>, <code>,</code>, and
+     * <code>)</code> characters.
+     *
+     * @param sql any SQL statement
+     * @return the original SQL, or, if specially marked, a stored procedure SQL statement compatible with aliases
+     */
+    private static String manualRadiumHackery(String sql) {
+
+        String radiumStoredProcedureMarker = "/*H2SP*/";
+        String radiumStoredProcedureMarkerRegex = "/\\*H2SP\\*/";
+        String radiumOpenCommentRegex = "/\\*\\*";
+        String radiumCloseCommentRegex = "\\*\\*/";
+
+        if (sql.startsWith(radiumStoredProcedureMarker)) {
+            sql = sql.replaceAll(radiumStoredProcedureMarkerRegex, "CALL ");
+            sql = sql.replaceAll(radiumOpenCommentRegex, "");
+            sql = sql.replaceAll(radiumCloseCommentRegex, "");
+        }
+
+        return sql;
+    }
+
+    /**
      * Parse a statement or a list of statements, and prepare it for execution.
      *
      * @param sql the SQL statement to parse
@@ -754,6 +779,7 @@ public class Parser {
      * @return the prepared object
      */
     Prepared parse(String sql) {
+        sql = manualRadiumHackery(sql);
         Prepared p;
         try {
             // first, try the fast variant
