@@ -22,7 +22,7 @@ SET MODE MSSQLServer;
 > ok
 
 SELECT CURRENT_DATE = GETDATE();
->> TRUE
+>> FALSE
 
 SET MODE Regular;
 > ok
