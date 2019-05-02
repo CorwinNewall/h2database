@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.engine;
@@ -10,11 +10,13 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
@@ -135,14 +137,15 @@ public class Database implements DataHandler {
     private final byte[] filePasswordHash;
     private final byte[] fileEncryptionKey;
 
-    private final HashMap<String, Role> roles = new HashMap<>();
-    private final HashMap<String, User> users = new HashMap<>();
-    private final HashMap<String, Setting> settings = new HashMap<>();
-    private final HashMap<String, Schema> schemas = new HashMap<>();
-    private final HashMap<String, Right> rights = new HashMap<>();
-    private final HashMap<String, Domain> domains = new HashMap<>();
-    private final HashMap<String, UserAggregate> aggregates = new HashMap<>();
-    private final HashMap<String, Comment> comments = new HashMap<>();
+    private final ConcurrentHashMap<String, Role> roles = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, User> users = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Setting> settings = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Schema> schemas = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Right> rights = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Domain> domains = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, UserAggregate> aggregates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Comment> comments = new ConcurrentHashMap<>();
+
     private final HashMap<String, TableEngine> tableEngines = new HashMap<>();
 
     private final Set<Session> userSessions =
@@ -1165,8 +1168,8 @@ public class Database implements DataHandler {
     }
 
     @SuppressWarnings("unchecked")
-    private HashMap<String, DbObject> getMap(int type) {
-        HashMap<String, ? extends DbObject> result;
+    private Map<String, DbObject> getMap(int type) {
+        Map<String, ? extends DbObject> result;
         switch (type) {
         case DbObject.USER:
             result = users;
@@ -1195,7 +1198,7 @@ public class Database implements DataHandler {
         default:
             throw DbException.throwInternalError("type=" + type);
         }
-        return (HashMap<String, DbObject>) result;
+        return (Map<String, DbObject>) result;
     }
 
     /**
@@ -1227,7 +1230,7 @@ public class Database implements DataHandler {
         if (id > 0 && !starting) {
             checkWritingAllowed();
         }
-        HashMap<String, DbObject> map = getMap(obj.getType());
+        Map<String, DbObject> map = getMap(obj.getType());
         if (obj.getType() == DbObject.USER) {
             User user = (User) obj;
             if (user.isAdmin() && systemUser.getName().equals(SYSTEM_USER_NAME)) {
@@ -1285,6 +1288,9 @@ public class Database implements DataHandler {
      * @return the schema or null
      */
     public Schema findSchema(String schemaName) {
+        if (schemaName == null) {
+            return null;
+        }
         Schema schema = schemas.get(schemaName);
         if (schema == infoSchema) {
             initMetaTables();
@@ -1803,21 +1809,21 @@ public class Database implements DataHandler {
         return list;
     }
 
-    public ArrayList<Schema> getAllSchemas() {
+    public Collection<Schema> getAllSchemas() {
         initMetaTables();
-        return new ArrayList<>(schemas.values());
+        return schemas.values();
     }
 
-    public ArrayList<Setting> getAllSettings() {
-        return new ArrayList<>(settings.values());
+    public Collection<Setting> getAllSettings() {
+        return settings.values();
     }
 
-    public ArrayList<Domain> getAllDomains() {
-        return new ArrayList<>(domains.values());
+    public Collection<Domain> getAllDomains() {
+        return domains.values();
     }
 
-    public ArrayList<User> getAllUsers() {
-        return new ArrayList<>(users.values());
+    public Collection<User> getAllUsers() {
+        return users.values();
     }
 
     public String getCacheType() {
@@ -1957,7 +1963,7 @@ public class Database implements DataHandler {
             DbObject obj, String newName) {
         checkWritingAllowed();
         int type = obj.getType();
-        HashMap<String, DbObject> map = getMap(type);
+        Map<String, DbObject> map = getMap(type);
         if (SysProperties.CHECK) {
             if (!map.containsKey(obj.getName())) {
                 DbException.throwInternalError("not found: " + obj.getName());
@@ -2027,7 +2033,7 @@ public class Database implements DataHandler {
         checkWritingAllowed();
         String objName = obj.getName();
         int type = obj.getType();
-        HashMap<String, DbObject> map = getMap(type);
+        Map<String, DbObject> map = getMap(type);
         if (SysProperties.CHECK && !map.containsKey(objName)) {
             DbException.throwInternalError("not found: " + objName);
         }
@@ -2655,12 +2661,26 @@ public class Database implements DataHandler {
      *
      * @param session the session
      * @param closeOthers whether other sessions are closed
+     * @return true if success, false otherwise
      */
-    public void setExclusiveSession(Session session, boolean closeOthers) {
-        this.exclusiveSession.set(session);
+    public boolean setExclusiveSession(Session session, boolean closeOthers) {
+        if (!exclusiveSession.compareAndSet(null, session)) {
+            return false;
+        }
         if (closeOthers) {
             closeAllSessionsException(session);
         }
+        return true;
+    }
+
+    /**
+     * Stop exclusive access the database by provided session.
+     *
+     * @param session the session
+     * @return true if success, false otherwise
+     */
+    public boolean unsetExclusiveSession(Session session) {
+        return exclusiveSession.compareAndSet(session, null);
     }
 
     @Override

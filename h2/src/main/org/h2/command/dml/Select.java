@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.command.dml;
@@ -8,8 +8,11 @@ package org.h2.command.dml;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map.Entry;
 import org.h2.api.ErrorCode;
 import org.h2.api.Trigger;
 import org.h2.command.Parser;
@@ -26,6 +29,7 @@ import org.h2.expression.analysis.DataAnalysisOperation;
 import org.h2.expression.analysis.Window;
 import org.h2.expression.condition.Comparison;
 import org.h2.expression.condition.ConditionAndOr;
+import org.h2.expression.function.Function;
 import org.h2.index.Cursor;
 import org.h2.index.Index;
 import org.h2.index.IndexType;
@@ -50,6 +54,7 @@ import org.h2.table.TableView;
 import org.h2.util.ColumnNamer;
 import org.h2.util.StringUtils;
 import org.h2.util.Utils;
+import org.h2.value.DataType;
 import org.h2.value.Value;
 import org.h2.value.ValueNull;
 import org.h2.value.ValueRow;
@@ -109,7 +114,13 @@ public class Select extends Query {
 
     private int[] distinctIndexes;
 
-    private int distinctColumnCount;
+    /**
+     * Number of columns including visible columns and additional virtual
+     * columns for ORDER BY and DISTINCT ON clauses. This number does not
+     * include virtual columns for HAVING and QUALIFY.
+     */
+    private int resultColumnCount;
+
     private ArrayList<Expression> group;
 
     /**
@@ -336,16 +347,23 @@ public class Select extends Query {
         if (isHavingNullOrFalse(row)) {
             return null;
         }
-        row = keepOnlyDistinct(row, columnCount);
-        return row;
+        return rowForResult(row, columnCount);
     }
 
-    private Value[] keepOnlyDistinct(Value[] row, int columnCount) {
-        if (columnCount == distinctColumnCount) {
+    /**
+     * Removes HAVING and QUALIFY columns from the row.
+     *
+     * @param row
+     *            the complete row
+     * @param columnCount
+     *            the number of columns to keep
+     * @return the same or the truncated row
+     */
+    private Value[] rowForResult(Value[] row, int columnCount) {
+        if (columnCount == resultColumnCount) {
             return row;
         }
-        // remove columns so that 'distinct' can filter duplicate rows
-        return Arrays.copyOf(row, distinctColumnCount);
+        return Arrays.copyOf(row, resultColumnCount);
     }
 
     private boolean isHavingNullOrFalse(Value[] row) {
@@ -587,8 +605,7 @@ public class Select extends Query {
                 offset--;
                 continue;
             }
-            row = keepOnlyDistinct(row, columnCount);
-            result.addRow(row);
+            result.addRow(rowForResult(row, columnCount));
         }
     }
 
@@ -779,7 +796,7 @@ public class Select extends Query {
     @Override
     public ResultInterface queryMeta() {
         LocalResult result = session.getDatabase().getResultFactory().create(session, expressionArray,
-                visibleColumnCount);
+                visibleColumnCount, resultColumnCount);
         result.done();
         return result;
     }
@@ -961,12 +978,12 @@ public class Select extends Query {
 
     private LocalResult createLocalResult(LocalResult old) {
         return old != null ? old : session.getDatabase().getResultFactory().create(session, expressionArray,
-                visibleColumnCount);
+                visibleColumnCount, resultColumnCount);
     }
 
     private LocalResult convertToDistinct(ResultInterface result) {
         LocalResult distinctResult = session.getDatabase().getResultFactory().create(session,
-            expressionArray, visibleColumnCount);
+            expressionArray, visibleColumnCount, resultColumnCount);
         distinctResult.setDistinct();
         result.reset();
         while (result.next()) {
@@ -998,7 +1015,7 @@ public class Select extends Query {
                     exceptTableColumns = w.mapExceptColumns();
                 }
                 for (TableFilter filter : filters) {
-                    i = expandColumnList(filter, i, exceptTableColumns);
+                    i = expandColumnList(filter, i, false, exceptTableColumns);
                 }
             } else {
                 Database db = session.getDatabase();
@@ -1019,26 +1036,63 @@ public class Select extends Query {
                 if (filter == null) {
                     throw DbException.get(ErrorCode.TABLE_OR_VIEW_NOT_FOUND_1, tableAlias);
                 }
-                i = expandColumnList(filter, i, exceptTableColumns);
+                i = expandColumnList(filter, i, true, exceptTableColumns);
             }
         }
     }
 
-    private int expandColumnList(TableFilter filter, int index, HashMap<Column, ExpressionColumn> except) {
+    private int expandColumnList(TableFilter filter, int index, boolean forAlias,
+            HashMap<Column, ExpressionColumn> except) {
         String alias = filter.getTableAlias();
-        for (Column c : filter.getTable().getColumns()) {
-            if (except != null && except.remove(c) != null) {
-                continue;
+        if (forAlias) {
+            for (Column c : filter.getTable().getColumns()) {
+                index = addExpandedColumn(filter, index, except, alias, c);
             }
-            if (!c.getVisible()) {
-                continue;
+        } else {
+            LinkedHashMap<Column, Column> commonJoinColumns = filter.getCommonJoinColumns();
+            if (commonJoinColumns != null) {
+                TableFilter replacementFilter = filter.getCommonJoinColumnsFilter();
+                String replacementAlias = replacementFilter.getTableAlias();
+                for (Entry<Column, Column> entry : commonJoinColumns.entrySet()) {
+                    Column left = entry.getKey(), right = entry.getValue();
+                    if (!filter.isCommonJoinColumnToExclude(right)
+                            && (except == null || except.remove(left) == null && except.remove(right) == null)) {
+                        Database database = session.getDatabase();
+                        Expression e;
+                        if (left == right
+                                || DataType.hasTotalOrdering(left.getType().getValueType())
+                                && DataType.hasTotalOrdering(right.getType().getValueType())) {
+                            e = new ExpressionColumn(database, null, replacementAlias,
+                                    replacementFilter.getColumnName(right), false);
+                        } else {
+                            Function f = Function.getFunction(database, "COALESCE");
+                            f.setParameter(0, new ExpressionColumn(database, null, alias,
+                                    filter.getColumnName(left), false));
+                            f.setParameter(1, new ExpressionColumn(database, null, replacementAlias,
+                                    replacementFilter.getColumnName(right), false));
+                            f.doneWithParameters();
+                            e = new Alias(f, left.getName(), true);
+                        }
+                        expressions.add(index++, e);
+                    }
+                }
             }
-            if (filter.isNaturalJoinColumn(c)) {
-                continue;
+            for (Column c : filter.getTable().getColumns()) {
+                if (commonJoinColumns == null || !commonJoinColumns.containsKey(c)) {
+                    if (!filter.isCommonJoinColumnToExclude(c)) {
+                        index = addExpandedColumn(filter, index, except, alias, c);
+                    }
+                }
             }
-            String name = filter.getDerivedColumnName(c);
+        }
+        return index;
+    }
+
+    private int addExpandedColumn(TableFilter filter, int index, HashMap<Column, ExpressionColumn> except,
+            String alias, Column c) {
+        if ((except == null || except.remove(c) == null) && c.getVisible()) {
             ExpressionColumn ec = new ExpressionColumn(
-                    session.getDatabase(), null, alias, name != null ? name : c.getName(), false);
+                    session.getDatabase(), null, alias, filter.getColumnName(c), false);
             expressions.add(index++, ec);
         }
         return index;
@@ -1049,6 +1103,7 @@ public class Select extends Query {
         if (checkInit) {
             DbException.throwInternalError();
         }
+        Collections.sort(filters, TableFilter.ORDER_IN_FROM_COMPARATOR);
         expandColumnList();
         visibleColumnCount = expressions.size();
         ArrayList<String> expressionSQL;
@@ -1081,7 +1136,7 @@ public class Select extends Query {
             initOrder(session, expressions, expressionSQL, orderList,
                     visibleColumnCount, isAnyDistinct(), filters);
         }
-        distinctColumnCount = expressions.size();
+        resultColumnCount = expressions.size();
         if (having != null) {
             expressions.add(having);
             havingIndex = expressions.size() - 1;

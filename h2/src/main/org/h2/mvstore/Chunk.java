@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.mvstore;
@@ -99,6 +99,12 @@ public class Chunk {
     public long unused;
 
     /**
+     * Version of the store at which chunk become unused and therefore can be
+     * considered "dead" and collected after this version is no longer in use.
+     */
+    public long unusedAtVersion;
+
+    /**
      * The last used map id.
      */
     public int mapId;
@@ -193,6 +199,7 @@ public class Chunk {
         c.metaRootPos = DataUtils.readHexLong(map, "root", 0);
         c.time = DataUtils.readHexLong(map, "time", 0);
         c.unused = DataUtils.readHexLong(map, "unused", 0);
+        c.unusedAtVersion = DataUtils.readHexLong(map, "unusedAtVersion", 0);
         c.version = DataUtils.readHexLong(map, "version", id);
         c.next = DataUtils.readHexLong(map, "next", 0);
         return c;
@@ -248,6 +255,9 @@ public class Chunk {
         DataUtils.appendMap(buff, "time", time);
         if (unused != 0) {
             DataUtils.appendMap(buff, "unused", unused);
+        }
+        if (unusedAtVersion != 0) {
+            DataUtils.appendMap(buff, "unusedAtVersion", unusedAtVersion);
         }
         DataUtils.appendMap(buff, "version", version);
         return buff.toString();

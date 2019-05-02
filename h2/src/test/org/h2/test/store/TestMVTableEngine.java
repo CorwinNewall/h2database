@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.test.store;
@@ -682,7 +682,8 @@ public class TestMVTableEngine extends TestDb {
             return;
         }
         deleteDb(getTestName());
-        String dbName = getTestName() + ";MV_STORE=TRUE";
+        // set WRITE_DELAY=0 so the free-unused-space runs on commit
+        String dbName = getTestName() + ";MV_STORE=TRUE;WRITE_DELAY=0";
         Connection conn;
         Statement stat;
         long maxSize = 0;
@@ -1135,7 +1136,8 @@ public class TestMVTableEngine extends TestDb {
 
     private void testReuseDiskSpace() throws Exception {
         deleteDb(getTestName());
-        String dbName = getTestName() + ";MV_STORE=TRUE";
+        // set WRITE_DELAY=0 so the free-unused-space runs on commit
+        String dbName = getTestName() + ";MV_STORE=TRUE;WRITE_DELAY=0";
         Connection conn;
         Statement stat;
         long maxSize = 0;

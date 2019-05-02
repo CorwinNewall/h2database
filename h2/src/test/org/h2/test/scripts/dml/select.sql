@@ -1,5 +1,5 @@
 -- Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
--- and the EPL 1.0 (http://h2database.com/html/license.html).
+-- and the EPL 1.0 (https://h2database.com/html/license.html).
 -- Initial Developer: H2 Group
 --
 
@@ -710,6 +710,20 @@ EXPLAIN SELECT * FROM TEST ORDER BY V;
 EXPLAIN SELECT * FROM TEST ORDER BY V FOR UPDATE;
 #+mvStore#>> SELECT "TEST"."ID", "TEST"."V" FROM "PUBLIC"."TEST" /* PUBLIC.CONSTRAINT_INDEX_2 */ ORDER BY 2 FOR UPDATE
 #-mvStore#>> SELECT "TEST"."ID", "TEST"."V" FROM "PUBLIC"."TEST" /* PUBLIC.CONSTRAINT_INDEX_2 */ ORDER BY 2 FOR UPDATE /* index sorted */
+
+DROP TABLE TEST;
+> ok
+
+-- The next tests should be at the of this file
+
+SET MAX_MEMORY_ROWS = 1;
+> ok
+
+CREATE TABLE TEST(I INT) AS SELECT * FROM SYSTEM_RANGE(1, 10);
+> ok
+
+SELECT COUNT(*) FROM (SELECT I, SUM(I) S, COUNT(I) C FROM TEST GROUP BY I HAVING S + C <= 9 ORDER BY I);
+>> 8
 
 DROP TABLE TEST;
 > ok

@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.value;
@@ -53,7 +53,6 @@ public class ValueDecimal extends Value {
 
     private final BigDecimal value;
     private TypeInfo type;
-    private String valueString;
 
     private ValueDecimal(BigDecimal value) {
         if (value == null) {
@@ -156,15 +155,7 @@ public class ValueDecimal extends Value {
 
     @Override
     public String getString() {
-        if (valueString == null) {
-            String p = value.toPlainString();
-            if (p.length() < 40) {
-                valueString = p;
-            } else {
-                valueString = value.toString();
-            }
-        }
-        return valueString;
+        return value.toString();
     }
 
     @Override

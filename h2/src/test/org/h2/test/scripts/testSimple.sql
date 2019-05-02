@@ -1,5 +1,5 @@
 -- Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
--- and the EPL 1.0 (http://h2database.com/html/license.html).
+-- and the EPL 1.0 (https://h2database.com/html/license.html).
 -- Initial Developer: H2 Group
 --
 select 1000L / 10;
@@ -15,13 +15,13 @@ select 1 from(select 2 from(select 1) a right join dual b) c;
 >> 1
 
 select 1.00 / 3 * 0.00;
->> 0.00000000000000000000000000000
+>> 0E-29
 
 select 1.00000 / 3 * 0.0000;
->> 0.0000000000000000000000000000000000
+>> 0E-34
 
 select 1.0000000 / 3 * 0.00000;
->> 0.0000000000000000000000000000000000000
+>> 0E-37
 
 select 1.0000000 / 3 * 0.000000;
 >> 0E-38

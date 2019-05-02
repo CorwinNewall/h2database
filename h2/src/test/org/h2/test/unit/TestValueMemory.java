@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.test.unit;
@@ -40,6 +40,7 @@ import org.h2.value.ValueGeometry;
 import org.h2.value.ValueInt;
 import org.h2.value.ValueInterval;
 import org.h2.value.ValueJavaObject;
+import org.h2.value.ValueJson;
 import org.h2.value.ValueLong;
 import org.h2.value.ValueNull;
 import org.h2.value.ValueResultSet;
@@ -246,6 +247,8 @@ public class TestValueMemory extends TestBase implements DataHandler {
         case Value.INTERVAL_HOUR_TO_MINUTE:
             return ValueInterval.from(IntervalQualifier.valueOf(type - Value.INTERVAL_YEAR),
                     random.nextBoolean(), random.nextInt(Integer.MAX_VALUE), random.nextInt(12));
+        case Value.JSON:
+            return ValueJson.get("{\"key\":\"value\"}");
         default:
             throw new AssertionError("type=" + type);
         }

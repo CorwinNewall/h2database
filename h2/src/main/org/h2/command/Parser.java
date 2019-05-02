@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  *
  * Nicolas Fortin, Atelier SIG, IRSTV FR CNRS 24888
@@ -57,6 +57,7 @@ import static org.h2.util.ParserUtil.TABLE;
 import static org.h2.util.ParserUtil.TRUE;
 import static org.h2.util.ParserUtil.UNION;
 import static org.h2.util.ParserUtil.UNIQUE;
+import static org.h2.util.ParserUtil.USING;
 import static org.h2.util.ParserUtil.VALUES;
 import static org.h2.util.ParserUtil.WHERE;
 import static org.h2.util.ParserUtil.WINDOW;
@@ -328,12 +329,12 @@ public class Parser {
     /**
      * The token "||".
      */
-    private static final int STRING_CONCAT = PLUS_SIGN + 1;
+    private static final int CONCATENATION = PLUS_SIGN + 1;
 
     /**
      * The token "(".
      */
-    private static final int OPEN_PAREN = STRING_CONCAT + 1;
+    private static final int OPEN_PAREN = CONCATENATION + 1;
 
     /**
      * The token ")".
@@ -525,6 +526,8 @@ public class Parser {
             "UNION",
             // UNIQUE
             "UNIQUE",
+            // USING
+            "USING",
             // VALUES
             "VALUES",
             // WHERE
@@ -1557,9 +1560,9 @@ public class Parser {
     private Prepared parseMerge() {
         int start = lastParseIndex;
         read("INTO");
-        List<String> excludeIdentifiers = Arrays.asList("USING", "KEY");
+        List<String> excludeIdentifiers = Collections.singletonList("KEY");
         TableFilter targetTableFilter = readSimpleTableFilter(0, excludeIdentifiers);
-        if (readIf("USING")) {
+        if (readIf(USING)) {
             return parseMergeUsing(targetTableFilter, start);
         }
         Merge command = new Merge(session);
@@ -2296,10 +2299,7 @@ public class Parser {
                 // the right hand side is the 'inner' table usually
                 join = readTableFilter();
                 join = readJoin(join);
-                Expression on = null;
-                if (readIf(ON)) {
-                    on = readExpression();
-                }
+                Expression on = readJoinSpecification(top, join, true);
                 addJoin(join, top, true, on);
                 top = join;
             } else if (readIf("LEFT")) {
@@ -2307,10 +2307,7 @@ public class Parser {
                 read(JOIN);
                 join = readTableFilter();
                 join = readJoin(join);
-                Expression on = null;
-                if (readIf(ON)) {
-                    on = readExpression();
-                }
+                Expression on = readJoinSpecification(top, join, false);
                 addJoin(top, join, true, on);
             } else if (readIf(FULL)) {
                 throw getSyntaxError();
@@ -2318,18 +2315,12 @@ public class Parser {
                 read(JOIN);
                 join = readTableFilter();
                 top = readJoin(top);
-                Expression on = null;
-                if (readIf(ON)) {
-                    on = readExpression();
-                }
+                Expression on = readJoinSpecification(top, join, false);
                 addJoin(top, join, false, on);
             } else if (readIf(JOIN)) {
                 join = readTableFilter();
                 top = readJoin(top);
-                Expression on = null;
-                if (readIf(ON)) {
-                    on = readExpression();
-                }
+                Expression on = readJoinSpecification(top, join, false);
                 addJoin(top, join, false, on);
             } else if (readIf(CROSS)) {
                 read(JOIN);
@@ -2338,32 +2329,15 @@ public class Parser {
             } else if (readIf(NATURAL)) {
                 read(JOIN);
                 join = readTableFilter();
-                Column[] tableCols = last.getTable().getColumns();
-                Column[] joinCols = join.getTable().getColumns();
-                String tableSchema = last.getTable().getSchema().getName();
-                String joinSchema = join.getTable().getSchema().getName();
+                Table table1 = last.getTable();
+                Table table2 = join.getTable();
+                String schema1 = table1.getSchema().getName();
+                String schema2 = table2.getSchema().getName();
                 Expression on = null;
-                for (Column tc : tableCols) {
-                    String tableColumnName = tc.getName();
-                    for (Column c : joinCols) {
-                        String joinColumnName = c.getName();
-                        if (equalsToken(tableColumnName, joinColumnName)) {
-                            join.addNaturalJoinColumn(c);
-                            Expression tableExpr = new ExpressionColumn(
-                                    database, tableSchema,
-                                    last.getTableAlias(), tableColumnName, false);
-                            Expression joinExpr = new ExpressionColumn(
-                                    database, joinSchema, join.getTableAlias(),
-                                    joinColumnName, false);
-                            Expression equal = new Comparison(session,
-                                    Comparison.EQUAL, tableExpr, joinExpr);
-                            if (on == null) {
-                                on = equal;
-                            } else {
-                                on = new ConditionAndOr(ConditionAndOr.AND, on,
-                                        equal);
-                            }
-                        }
+                for (Column column1 : table1.getColumns()) {
+                    Column column2 = join.getColumn(last.getColumnName(column1), true);
+                    if (column2 != null) {
+                        on = addJoinColumn(on, last, join, schema1, schema2, column1, column2, false);
                     }
                 }
                 addJoin(top, join, false, on);
@@ -2373,6 +2347,47 @@ public class Parser {
             last = join;
         }
         return top;
+    }
+
+    private Expression readJoinSpecification(TableFilter filter1, TableFilter filter2, boolean rightJoin) {
+        Expression on = null;
+        if (readIf(ON)) {
+            on = readExpression();
+        } else if (readIf(USING)) {
+            read(OPEN_PAREN);
+            Table table1 = filter1.getTable();
+            Table table2 = filter2.getTable();
+            String schema1 = table1.getSchema().getName();
+            String schema2 = table2.getSchema().getName();
+            do {
+                String columnName = readColumnIdentifier();
+                on = addJoinColumn(on, filter1, filter2, schema1, schema2, filter1.getColumn(columnName, false),
+                        filter2.getColumn(columnName, false), rightJoin);
+            } while (readIfMore(true));
+        }
+        return on;
+    }
+
+    private Expression addJoinColumn(Expression on, TableFilter filter1, TableFilter filter2, String schema1,
+            String schema2, Column column1, Column column2, boolean rightJoin) {
+        if (rightJoin) {
+            filter1.addCommonJoinColumns(column1, column2, filter2);
+            filter2.addCommonJoinColumnToExclude(column2);
+        } else {
+            filter1.addCommonJoinColumns(column1, column1, filter1);
+            filter2.addCommonJoinColumnToExclude(column2);
+        }
+        Expression tableExpr = new ExpressionColumn(database, schema1, filter1.getTableAlias(),
+                filter1.getColumnName(column1), false);
+        Expression joinExpr = new ExpressionColumn(database, schema2, filter2.getTableAlias(),
+                filter2.getColumnName(column2), false);
+        Expression equal = new Comparison(session, Comparison.EQUAL, tableExpr, joinExpr);
+        if (on == null) {
+            on = equal;
+        } else {
+            on = new ConditionAndOr(ConditionAndOr.AND, on, equal);
+        }
+        return on;
     }
 
     /**
@@ -3072,7 +3087,7 @@ public class Parser {
     private Expression readConcat() {
         Expression r = readSum();
         while (true) {
-            if (readIf(STRING_CONCAT)) {
+            if (readIf(CONCATENATION)) {
                 r = new BinaryOperation(OpType.CONCAT, r, readSum());
             } else if (readIf(TILDE)) {
                 if (readIf(ASTERISK)) {
@@ -5234,7 +5249,7 @@ public class Parser {
             break;
         case '|':
             if (c1 == '|') {
-                return STRING_CONCAT;
+                return CONCATENATION;
             }
             break;
         case '&':
@@ -5894,7 +5909,7 @@ public class Parser {
             read(OPEN_PAREN);
             command.setIndexColumns(parseIndexColumnList());
 
-            if (readIf("USING")) {
+            if (readIf(USING)) {
                 if (hash) {
                     throw getSyntaxError();
                 }
@@ -7701,7 +7716,7 @@ public class Parser {
             }
             command.setIndexColumns(parseIndexColumnList());
             // MySQL compatibility
-            if (readIf("USING")) {
+            if (readIf(USING)) {
                 read("BTREE");
             }
             return command;
@@ -7732,7 +7747,7 @@ public class Parser {
                 command.setIndex(getSchema().findIndex(session, indexName));
             }
             // MySQL compatibility
-            if (readIf("USING")) {
+            if (readIf(USING)) {
                 read("BTREE");
             }
         } else if (readIf(FOREIGN)) {
@@ -8023,6 +8038,12 @@ public class Parser {
             }
             if (NullConstraintType.NULL_IS_NOT_ALLOWED == parseNotNullConstraint()) {
                 column.setNullable(false);
+            }
+            if (column.getComment() == null) {
+                String comment = readCommentIf();
+                if (comment != null) {
+                    column.setComment(comment);
+                }
             }
             if (readIf(CHECK)) {
                 Expression expr = readExpression();

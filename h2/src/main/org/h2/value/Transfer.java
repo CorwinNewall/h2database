@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.value;
@@ -69,6 +69,7 @@ public class Transfer {
     private static final int ENUM = 25;
     private static final int INTERVAL = 26;
     private static final int ROW = 27;
+    private static final int JSON = 28;
 
     private Socket socket;
     private DataInputStream in;
@@ -606,6 +607,11 @@ public class Transfer {
                 writeString(v.getString());
             }
             break;
+        case Value.JSON: {
+            writeInt(JSON);
+            writeString(v.getString());
+            break;
+        }
         default:
             if (JdbcUtils.customDataTypesHandler != null) {
                 writeInt(type);
@@ -777,6 +783,10 @@ public class Transfer {
             }
             return ValueInterval.from(IntervalQualifier.valueOf(ordinal), negative, readLong(),
                     ordinal < 5 ? 0 : readLong());
+        }
+        case JSON: {
+            String s = readString();
+            return ValueJson.get(s);
         }
         default:
             if (JdbcUtils.customDataTypesHandler != null) {

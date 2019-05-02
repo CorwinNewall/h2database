@@ -1,5 +1,5 @@
 -- Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
--- and the EPL 1.0 (http://h2database.com/html/license.html).
+-- and the EPL 1.0 (https://h2database.com/html/license.html).
 -- Initial Developer: H2 Group
 --
 
@@ -94,3 +94,18 @@ INSERT INTO TEST VALUES ((1, 3));
 
 DROP TABLE TEST;
 > ok
+
+SELECT ARRAY[1, 2] || 3;
+>> [1, 2, 3]
+
+SELECT ARRAY[1, 2] || ARRAY[3];
+>> [1, 2, 3]
+
+SELECT ARRAY[1, 2] || ARRAY[3, 4];
+>> [1, 2, 3, 4]
+
+SELECT ARRAY[1, 2] || NULL;
+>> null
+
+SELECT NULL::ARRAY || ARRAY[2];
+>> null

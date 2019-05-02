@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <!--
 Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
-and the EPL 1.0 (http://h2database.com/html/license.html).
+and the EPL 1.0 (https://h2database.com/html/license.html).
 Initial Developer: H2 Group
 -->
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
@@ -21,7 +21,75 @@ Change Log
 
 <h2>Next Version (unreleased)</h2>
 <ul>
-<li>-
+<li>Issue #1892: Window aggregate functions return incorrect result without window ordering and with ROWS unit
+</li>
+<li>Issue #1890: ArrayIndexOutOfBoundsException in MVSortedTempResult.getKey
+</li>
+<li>Issue #308: Mode MySQL and LAST_INSERT_ID with argument
+</li>
+<li>Issue #1883: Suspicious code in Session.getLocks()
+</li>
+<li>Issue #1878: OPTIMIZE_REUSE_RESULTS causes incorrect result after rollback since 1.4.198
+</li>
+<li>PR #1880: Collation names like CHARSET_* recognition
+</li>
+<li>Issue #1844: MySQL Compatibility: create table error when primary key has comment
+</li>
+<li>PR #1873: Concurrency in database metadata
+</li>
+<li>Issue #1864: Failing to format NotSerializableException corrupting the database
+</li>
+<li>PR #1868: add more checking to TestFileLock
+</li>
+<li>Issue #1819: Trace.db file exceed file size limit (64MB)
+</li>
+<li>Issue #1861: Use COALESCE in named columns join for some data types
+</li>
+<li>PR #1860: Additional fix for deadlock on shutdown (exclusively in PageStore mode)
+</li>
+<li>Issue #1855: Wrong qualified asterisked projections in named column join
+</li>
+<li>Issue #1854: Wrong asterisked projection and result in named column right outer join
+</li>
+<li>Issue #1852: Named column joins doesn't work with the VALUES constructor and derived column lists
+</li>
+<li>Issue #1851: Wrong asterisked projection in named column joins
+</li>
+<li>PR #1850: Duplicate map identifiers
+</li>
+<li>PR #1849: Reimplement MVStore.findOldChunks() with PriorityQueue
+</li>
+<li>PR #1848: Reimplement MVStore.findChunksToMove() with PriorityQueue
+</li>
+<li>Issue #1843: Named columns join syntax is not supported
+</li>
+<li>Issue #1841: Deadlock during concurrent shutdown attempts with 1.4.199
+</li>
+<li>Issue #1834: NUMERIC does not preserve its scale for some values
+</li>
+<li>PR #1838: Implement conversion from JSON to GEOMETRY
+</li>
+<li>PR #1837: Implement conversion from GEOMETRY to JSON
+</li>
+<li>PR #1836: Add LSHIFT and RSHIFT function
+</li>
+<li>PR #1833: Add BITNOT function
+</li>
+<li>PR #1832: JSON validation and normalization
+</li>
+<li>PR #1829: MVStore chunks occupancy rate calculation fixes
+</li>
+<li>PR #1828: Basis for implementation of SQL/JSON standard
+</li>
+<li>PR #1827: Add support for Lucene 8.0.0
+</li>
+<li>Issue #1820: Performance problem on commit
+</li>
+<li>Issue #1822: Use https:// in h2database.com hyperlinks
+</li>
+<li>PR #1817: Assorted minor changes in documentation and other places
+</li>
+<li>PR #1812: An IllegalStateException that wraps EOFException is thrown when partial writes happens
 </li>
 </ul>
 
@@ -1370,7 +1438,7 @@ temporary storages
 </li>
 <li>Issue #662: column called CONSTRAINT is not properly escaped when storing to metadata
 </li>
-<li>Issue #660: Outdated java version mentioned on http://h2database.com/html/build.html#providing_patches
+<li>Issue #660: Outdated java version mentioned on https://h2database.com/html/build.html#providing_patches
 </li>
 <li>Issue #643: H2 doesn't use index when I use IN and EQUAL in one query
 </li>

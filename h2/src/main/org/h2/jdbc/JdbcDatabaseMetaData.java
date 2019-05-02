@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.jdbc;
@@ -1572,7 +1572,7 @@ public class JdbcDatabaseMetaData extends TraceObject implements
      * RANGE, REGEXP, RIGHT, ROW, _ROWID_, ROWNUM, ROWS,
      * SELECT, SYSDATE, SYSTIME, SYSTIMESTAMP,
      * TABLE, TODAY, TOP, TRAILING, TRUE,
-     * UNION, UNIQUE,
+     * UNION, UNIQUE, USING
      * VALUES,
      * WHERE, WINDOW, WITH
      * </pre>
@@ -3086,12 +3086,12 @@ public class JdbcDatabaseMetaData extends TraceObject implements
     /**
      * Gets the SQL State type.
      *
-     * @return DatabaseMetaData.sqlStateSQL99
+     * @return {@link DatabaseMetaData#sqlStateSQL}
      */
     @Override
     public int getSQLStateType() {
         debugCodeCall("getSQLStateType");
-        return DatabaseMetaData.sqlStateSQL99;
+        return DatabaseMetaData.sqlStateSQL;
     }
 
     /**

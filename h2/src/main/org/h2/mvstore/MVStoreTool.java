@@ -1,6 +1,6 @@
 /*
  * Copyright 2004-2019 H2 Group. Multiple-Licensed under the MPL 2.0,
- * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * and the EPL 1.0 (https://h2database.com/html/license.html).
  * Initial Developer: H2 Group
  */
 package org.h2.mvstore;
@@ -122,7 +122,17 @@ public class MVStoreTool {
             long pageCount = 0;
             for (long pos = 0; pos < fileSize;) {
                 block.rewind();
-                DataUtils.readFully(file, pos, block);
+                // Bugfix - An IllegalStateException that wraps EOFException is
+                // thrown when partial writes happens in the case of power off
+                // or file system issues.
+                // So we should skip the broken block at end of the DB file.
+                try {
+                    DataUtils.readFully(file, pos, block);
+                } catch (IllegalStateException e){
+                    pos += blockSize;
+                    pw.printf("ERROR illegal position %d%n", pos);
+                    continue;
+                }
                 block.rewind();
                 int headerType = block.get();
                 if (headerType == 'H') {
@@ -508,36 +518,48 @@ public class MVStoreTool {
      */
     public static void compact(MVStore source, MVStore target) {
         int autoCommitDelay = target.getAutoCommitDelay();
-        int retentionTime = target.getRetentionTime();
-        target.setAutoCommitDelay(0);
-        target.setRetentionTime(Integer.MAX_VALUE); // disable unused chunks collection
-        MVMap<String, String> sourceMeta = source.getMetaMap();
-        MVMap<String, String> targetMeta = target.getMetaMap();
-        for (Entry<String, String> m : sourceMeta.entrySet()) {
-            String key = m.getKey();
-            if (key.startsWith("chunk.")) {
-                // ignore
-            } else if (key.startsWith("map.")) {
-                // ignore
-            } else if (key.startsWith("name.")) {
-                // ignore
-            } else if (key.startsWith("root.")) {
-                // ignore
-            } else {
-                targetMeta.put(key, m.getValue());
+        boolean reuseSpace = target.getReuseSpace();
+        try {
+            target.setReuseSpace(false);  // disable unused chunks collection
+            target.setAutoCommitDelay(0); // disable autocommit
+            MVMap<String, String> sourceMeta = source.getMetaMap();
+            MVMap<String, String> targetMeta = target.getMetaMap();
+            for (Entry<String, String> m : sourceMeta.entrySet()) {
+                String key = m.getKey();
+                if (key.startsWith("chunk.")) {
+                    // ignore
+                } else if (key.startsWith("map.")) {
+                    // ignore
+                } else if (key.startsWith("name.")) {
+                    // ignore
+                } else if (key.startsWith("root.")) {
+                    // ignore
+                } else {
+                    targetMeta.put(key, m.getValue());
+                }
             }
+            // We are going to cheat a little bit in the copyFrom() by employing "incomplete" pages,
+            // which would be spared of saving, but save completed pages underneath,
+            // and those may appear as dead (non-reachable).
+            // That's why it is important to preserve all chunks
+            // created in the process, especially if retention time
+            // is set to a lower value, or even 0.
+            for (String mapName : source.getMapNames()) {
+                MVMap.Builder<Object, Object> mp =
+                        new MVMap.Builder<>().
+                                keyType(new GenericDataType()).
+                                valueType(new GenericDataType());
+                MVMap<Object, Object> sourceMap = source.openMap(mapName, mp);
+                MVMap<Object, Object> targetMap = target.openMap(mapName, mp);
+                targetMap.copyFrom(sourceMap);
+            }
+            // this will end hacky mode of operation with incomplete pages
+            // end ensure that all pages are saved
+            target.commit();
+        } finally {
+            target.setAutoCommitDelay(autoCommitDelay);
+            target.setReuseSpace(reuseSpace);
         }
-        for (String mapName : source.getMapNames()) {
-            MVMap.Builder<Object, Object> mp =
-                    new MVMap.Builder<>().
-                    keyType(new GenericDataType()).
-                    valueType(new GenericDataType());
-            MVMap<Object, Object> sourceMap = source.openMap(mapName, mp);
-            MVMap<Object, Object> targetMap = target.openMap(mapName, mp);
-            targetMap.copyFrom(sourceMap);
-        }
-        target.setRetentionTime(retentionTime);
-        target.setAutoCommitDelay(autoCommitDelay);
     }
 
     /**
