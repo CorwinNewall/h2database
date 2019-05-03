@@ -692,6 +692,7 @@ public class Parser {
         String radiumCloseCommentRegex = "\\*\\*/";
 
         if (sql.startsWith(radiumStoredProcedureMarker)) {
+            sql = sql.replaceAll("(?i)EXEC(UTE)? ", "");
             sql = sql.replaceAll(radiumStoredProcedureMarkerRegex, "CALL ");
             sql = sql.replaceAll(radiumOpenCommentRegex, "");
             sql = sql.replaceAll(radiumCloseCommentRegex, "");
