@@ -676,6 +676,12 @@ public class Parser {
     }
 
     /**
+     * Provides manual hackery until H2 supports SQL Server syntax more fully.
+     *
+     * Update limits are converted from UPDATE TOP(X) Y SET... to UPDATE Y SET... LIMIT X.
+     * Only one update per statement, and (other than whitespace) UPDATE must be the first
+     * word. Case insensitive.
+     *
      * To quickly support the execution of SQL prepared statements on SQL Server, replace
      * <code>/*H2SP**&#47;</code> with the word <code>CALL </code> (and a space), then remove all instances of /** and
      * **&#47; from the rest of the SQL. These comments should be used to add <code>(</code>, <code>,</code>, and
@@ -685,6 +691,13 @@ public class Parser {
      * @return the original SQL, or, if specially marked, a stored procedure SQL statement compatible with aliases
      */
     private static String manualRadiumHackery(String sql) {
+
+        String topUpdateRegex = "(?i)(\\s*)(UPDATE)(\\s*TOP\\s*\\(\\s*)(\\d+)(\\s*\\))(.*)";
+
+        if (sql.matches(topUpdateRegex)) {
+            sql = sql.replaceFirst(topUpdateRegex, "$1$2$6 LIMIT $4");
+            return sql;
+        }
 
         String radiumStoredProcedureMarker = "/*H2SP*/";
         String radiumStoredProcedureMarkerRegex = "/\\*H2SP\\*/";
