@@ -5,26 +5,15 @@
  */
 package org.h2.table;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-
 import org.h2.api.ErrorCode;
 import org.h2.command.Prepared;
 import org.h2.command.ddl.CreateTableData;
-import org.h2.command.dml.AllColumnsForPlan;
-import org.h2.command.dml.Query;
+import org.h2.command.dml.*;
 import org.h2.engine.Database;
 import org.h2.engine.DbObject;
 import org.h2.engine.Session;
 import org.h2.engine.User;
-import org.h2.expression.Alias;
-import org.h2.expression.Expression;
-import org.h2.expression.ExpressionColumn;
-import org.h2.expression.ExpressionVisitor;
-import org.h2.expression.Parameter;
+import org.h2.expression.*;
 import org.h2.index.Index;
 import org.h2.index.IndexType;
 import org.h2.index.ViewIndex;
@@ -38,6 +27,10 @@ import org.h2.util.StringUtils;
 import org.h2.util.Utils;
 import org.h2.value.TypeInfo;
 import org.h2.value.Value;
+
+import java.util.*;
+
+import static java.lang.String.format;
 
 /**
  * A view is a virtual table that is defined by a query.
@@ -385,12 +378,78 @@ public class TableView extends Table {
 
     @Override
     public void removeRow(Session session, Row row) {
-        throw DbException.getUnsupportedException("VIEW");
+        if (tables.size() > 1)
+            throw DbException.getUnsupportedException("VIEW");
+
+        if (tables.size() == 1) {
+            Table baseTable = tables.get(0);
+
+            StringBuilder crudeDelete = new StringBuilder("DELETE FROM ")
+                    .append(baseTable.getSchema().getName())
+                    .append(".")
+                    .append(baseTable.getName())
+                    .append(" WHERE ");
+
+            ArrayList<Expression> expressions = viewQuery.getExpressions();
+            for (int i = 0; i < expressions.size(); i++) {
+                Expression expression = expressions.get(i);
+                Expression nonAliasExpression = expression.getNonAliasExpression();
+                String baseTableColumnName = nonAliasExpression.getColumnName();
+                Value value = row.getValueList()[i];
+                crudeDelete.append(baseTableColumnName).append(value.containsNull() ? " IS " : " = ")
+                        .append(value).append(i == expressions.size() - 1 ? "" : " AND ");
+            }
+            crudeDelete.append(" LIMIT 1");
+
+            String sql = crudeDelete.toString();
+
+            Delete command = (Delete) session.prepare(sql);
+
+            int update = command.update();
+
+            if (update == 0) {
+                throw DbException.convert(new IllegalStateException(format("Update updated 0 rows! %s.%s - %s", getSchema().getName(), getName(), sql)));
+            }
+        }
     }
 
     @Override
     public void addRow(Session session, Row row) {
-        throw DbException.getUnsupportedException("VIEW");
+        if (tables.size() > 1)
+            throw DbException.getUnsupportedException("VIEW");
+
+        if (tables.size() == 1) {
+            Table baseTable = tables.get(0);
+
+            StringBuilder crudeUpdateColumns = new StringBuilder("INSERT INTO ")
+                    .append(baseTable.getSchema().getName())
+                    .append(".")
+                    .append(baseTable.getName())
+                    .append(" (");
+
+            StringBuilder crudeUpdateValue = new StringBuilder(") VALUES (");
+
+            ArrayList<Expression> expressions = viewQuery.getExpressions();
+            for (int i = 0; i < expressions.size(); i++) {
+                Expression expression = expressions.get(i);
+                Expression nonAliasExpression = expression.getNonAliasExpression();
+                String baseTableColumnName = nonAliasExpression.getColumnName();
+                crudeUpdateColumns.append(baseTableColumnName).append(i == expressions.size() - 1 ? "" : ", ");
+                crudeUpdateValue.append(row.getValueList()[i]).append(i == expressions.size() - 1 ? "" : ", ");
+            }
+            crudeUpdateValue.append(')');
+
+            String sql = format("%s%s", crudeUpdateColumns, crudeUpdateValue);
+
+            Insert command = (Insert) session.prepare(sql);
+
+            int updated = command.update();
+
+            if (updated == 0) {
+                throw DbException.convert(new IllegalStateException(format("Insert updated 0 rows! %s.%s - %s", getSchema().getName(), getName(), sql)));
+            }
+        }
+
     }
 
     @Override
