@@ -678,21 +678,18 @@ public class Parser {
     }
 
     /**
-     * Provides manual hackery until H2 supports SQL Server syntax more fully.
+     * Provides manual hackery unless H2 supports SQL Server syntax more fully and Radium uses it less obscurely.
      *
      * Update limits are converted from UPDATE TOP(X) Y SET... to UPDATE Y SET... LIMIT X.
      * Only one update per statement, and (other than whitespace) UPDATE must be the first
      * word. Case insensitive.
      *
-     * To quickly support the execution of SQL prepared statements on SQL Server, replace
-     * <code>/*H2SP**&#47;</code> with the word <code>CALL </code> (and a space), then remove all instances of /** and
-     * **&#47; from the rest of the SQL. These comments should be used to add <code>(</code>, <code>,</code>, and
-     * <code>)</code> characters.
-     *
      * @param sql any SQL statement
-     * @return the original SQL, or, if specially marked, a stored procedure SQL statement compatible with aliases
+     * @return SQL which should be compatible with H2
      */
     private static String manualRadiumHackery(String sql) {
+
+        sql = fixBlobFormatIgnoringJournalInserts(sql);
 
         String topUpdateRegex = "(?i)(\\s*)(UPDATE)(\\s*TOP\\s*\\(\\s*)(\\d+)(\\s*\\))(.*)";
 
@@ -701,18 +698,18 @@ public class Parser {
             return sql;
         }
 
-        String radiumStoredProcedureMarker = "/*H2SP*/";
-        String radiumStoredProcedureMarkerRegex = "/\\*H2SP\\*/";
-        String radiumOpenCommentRegex = "/\\*\\*";
-        String radiumCloseCommentRegex = "\\*\\*/";
+        return sql;
+    }
 
-        if (sql.startsWith(radiumStoredProcedureMarker)) {
-            sql = sql.replaceAll("(?i)EXEC(UTE)? ", "");
-            sql = sql.replaceAll(radiumStoredProcedureMarkerRegex, "CALL ");
-            sql = sql.replaceAll(radiumOpenCommentRegex, "");
-            sql = sql.replaceAll(radiumCloseCommentRegex, "");
+    private static String fixBlobFormatIgnoringJournalInserts(String sql) {
+        String blobRegex = "(.*)(\\b)(0x)([0-9A-Fa-f]+)(\\b)(.*)";
+        String journalInsertRegex = "(?i).*INSERT\\s+INTO\\s+.*Journal";
+
+        if (!sql.matches(journalInsertRegex)) {
+            while (sql.matches(blobRegex)) {
+                sql = sql.replaceFirst(blobRegex, "$1$2'$4'$5$6");
+            }
         }
-
         return sql;
     }
 
