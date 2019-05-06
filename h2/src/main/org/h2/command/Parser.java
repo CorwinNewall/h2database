@@ -680,23 +680,12 @@ public class Parser {
     /**
      * Provides manual hackery unless H2 supports SQL Server syntax more fully and Radium uses it less obscurely.
      *
-     * Update limits are converted from UPDATE TOP(X) Y SET... to UPDATE Y SET... LIMIT X.
-     * Only one update per statement, and (other than whitespace) UPDATE must be the first
-     * word. Case insensitive.
-     *
      * @param sql any SQL statement
      * @return SQL which should be compatible with H2
      */
     private static String manualRadiumHackery(String sql) {
 
         sql = fixBlobFormatIgnoringJournalInserts(sql);
-
-        String topUpdateRegex = "(?i)(\\s*)(UPDATE)(\\s*TOP\\s*\\(\\s*)(\\d+)(\\s*\\))(.*)";
-
-        if (sql.matches(topUpdateRegex)) {
-            sql = sql.replaceFirst(topUpdateRegex, "$1$2$6 LIMIT $4");
-            return sql;
-        }
 
         return sql;
     }
