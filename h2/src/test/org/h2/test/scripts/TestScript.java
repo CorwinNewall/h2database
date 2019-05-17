@@ -159,7 +159,8 @@ public class TestScript extends TestDb {
         }
         for (String s : new String[] { "alterTableAdd", "alterTableAlterColumn", "alterTableDropColumn",
                 "alterTableRename", "createAlias", "createSequence", "createSynonym", "createTable", "createTrigger",
-                "createView", "dropAllObjects", "dropDomain", "dropIndex", "dropSchema", "truncateTable" }) {
+                "createView", "dropAllObjects", "dropDomain", "dropIndex", "dropSchema", "dropTable",
+                "truncateTable" }) {
             testScript("ddl/" + s + ".sql");
         }
         for (String s : new String[] { "delete", "error_reporting", "insert", "insertIgnore", "merge", "mergeUsing",
@@ -170,9 +171,14 @@ public class TestScript extends TestDb {
             testScript("other/" + s + ".sql");
         }
         for (String s : new String[] { "any", "array-agg", "avg", "bit-and", "bit-or", "count", "envelope",
-                "every", "histogram", "listagg", "max", "min", "mode", "percentile", "rank", "selectivity",
+                "every", "histogram",
+                "json_arrayagg", "json_objectagg",
+                "listagg", "max", "min", "mode", "percentile", "rank", "selectivity",
                 "stddev-pop", "stddev-samp", "sum", "var-pop", "var-samp" }) {
             testScript("functions/aggregate/" + s + ".sql");
+        }
+        for (String s : new String[] { "json_array", "json_object" }) {
+            testScript("functions/json/" + s + ".sql");
         }
         for (String s : new String[] { "abs", "acos", "asin", "atan", "atan2",
                 "bitand", "bitget", "bitnot", "bitor", "bitxor", "ceil", "compress",

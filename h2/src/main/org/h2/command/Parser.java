@@ -167,9 +167,12 @@ import org.h2.engine.UserAggregate;
 import org.h2.expression.Alias;
 import org.h2.expression.BinaryOperation;
 import org.h2.expression.BinaryOperation.OpType;
+import org.h2.expression.Format.FormatEnum;
 import org.h2.expression.Expression;
 import org.h2.expression.ExpressionColumn;
 import org.h2.expression.ExpressionList;
+import org.h2.expression.ExpressionWithFlags;
+import org.h2.expression.Format;
 import org.h2.expression.Parameter;
 import org.h2.expression.Rownum;
 import org.h2.expression.SequenceValue;
@@ -2171,15 +2174,11 @@ public class Parser {
     private Prepared parseDrop() {
         if (readIf(TABLE)) {
             boolean ifExists = readIfExists(false);
-            String tableName = readIdentifierWithSchema();
-            DropTable command = new DropTable(session, getSchema());
-            command.setTableName(tableName);
-            while (readIf(COMMA)) {
-                tableName = readIdentifierWithSchema();
-                DropTable next = new DropTable(session, getSchema());
-                next.setTableName(tableName);
-                command.addNextDropTable(next);
-            }
+            DropTable command = new DropTable(session);
+            do {
+                String tableName = readIdentifierWithSchema();
+                command.addTable(getSchema(), tableName);
+            } while (readIf(COMMA));
             ifExists = readIfExists(ifExists);
             command.setIfExists(ifExists);
             if (readIf("CASCADE")) {
@@ -2188,6 +2187,7 @@ public class Parser {
             } else if (readIf("RESTRICT")) {
                 command.setDropAction(ConstraintActionType.RESTRICT);
             } else if (readIf("IGNORE")) {
+                // TODO SET_DEFAULT works in the same way as CASCADE
                 command.setDropAction(ConstraintActionType.SET_DEFAULT);
             }
             return command;
@@ -3306,10 +3306,7 @@ public class Parser {
         case ARRAY_AGG: {
             boolean distinct = readDistinctAgg();
             r = new Aggregate(AggregateType.ARRAY_AGG, new Expression[] { readExpression() }, currentSelect, distinct);
-            if (readIf(ORDER)) {
-                read("BY");
-                r.setOrderByList(parseSimpleOrderList());
-            }
+            readAggregateOrderBy(r);
             break;
         }
         case RANK:
@@ -3352,6 +3349,27 @@ public class Parser {
                     readAggregateOrder(r, expr, false);
                 }
             }
+            break;
+        }
+        case JSON_OBJECTAGG: {
+            boolean withKey = readIf("KEY");
+            Expression key = readExpression();
+            if (withKey) {
+                read("VALUE");
+            } else if (!readIf("VALUE")) {
+                read(COLON);
+            }
+            Expression value = readExpression();
+            r = new Aggregate(AggregateType.JSON_OBJECTAGG, new Expression[] { key, value }, currentSelect, false);
+            readJsonObjectFunctionFlags(r, false);
+            break;
+        }
+        case JSON_ARRAYAGG: {
+            r = new Aggregate(AggregateType.JSON_ARRAYAGG, new Expression[] { readExpression() }, currentSelect,
+                    false);
+            readAggregateOrderBy(r);
+            r.setFlags(Function.JSON_ABSENT_ON_NULL);
+            readJsonObjectFunctionFlags(r, true);
             break;
         }
         default:
@@ -3400,6 +3418,13 @@ public class Parser {
         }
         orderList.add(order);
         r.setOrderByList(orderList);
+    }
+
+    private void readAggregateOrderBy(Aggregate r) {
+        if (readIf(ORDER)) {
+            read("BY");
+            r.setOrderByList(parseSimpleOrderList());
+        }
     }
 
     private ArrayList<SelectOrderBy> parseSimpleOrderList() {
@@ -3791,6 +3816,36 @@ public class Parser {
             tf.setColumns(columns);
             break;
         }
+        case Function.JSON_OBJECT: {
+            int i = 0;
+            if (!readJsonObjectFunctionFlags(function, false)) {
+                do {
+                    boolean withKey = readIf("KEY");
+                    function.setParameter(i++, readExpression());
+                    if (withKey) {
+                        read("VALUE");
+                    } else if (!readIf("VALUE")) {
+                        read(COLON);
+                    }
+                    function.setParameter(i++, readExpression());
+                } while (readIf(COMMA));
+                readJsonObjectFunctionFlags(function, false);
+            }
+            read(CLOSE_PAREN);
+            break;
+        }
+        case Function.JSON_ARRAY: {
+            function.setFlags(Function.JSON_ABSENT_ON_NULL);
+            int i = 0;
+            if (!readJsonObjectFunctionFlags(function, true)) {
+                do {
+                    function.setParameter(i++, readExpression());
+                } while (readIf(COMMA));
+                readJsonObjectFunctionFlags(function, true);
+            }
+            read(CLOSE_PAREN);
+            break;
+        }
         default:
             if (!readIf(CLOSE_PAREN)) {
                 int i = 0;
@@ -3879,6 +3934,57 @@ public class Parser {
             read("NULLS");
             function.setIgnoreNulls(true);
         }
+    }
+
+    private boolean readJsonObjectFunctionFlags(ExpressionWithFlags function, boolean forArray) {
+        int start = lastParseIndex;
+        boolean result = false;
+        int flags = function.getFlags();
+        if (readIf(NULL)) {
+            if (readIf(ON)) {
+                read(NULL);
+                flags &= ~Function.JSON_ABSENT_ON_NULL;
+                result = true;
+            } else {
+                parseIndex = start;
+                read();
+                return false;
+            }
+        } else if (readIf("ABSENT")) {
+            if (readIf(ON)) {
+                read(NULL);
+                flags |= Function.JSON_ABSENT_ON_NULL;
+                result = true;
+            } else {
+                parseIndex = start;
+                read();
+                return false;
+            }
+        }
+        if (!forArray) {
+            if (readIf(WITH)) {
+                read(UNIQUE);
+                read("KEYS");
+                flags |= Function.JSON_WITH_UNIQUE_KEYS;
+                result = true;
+            } else if (readIf("WITHOUT")) {
+                if (readIf(UNIQUE)) {
+                    read("KEYS");
+                    flags &= ~Function.JSON_WITH_UNIQUE_KEYS;
+                    result = true;
+                } else if (result) {
+                    throw getSyntaxError();
+                } else {
+                    parseIndex = start;
+                    read();
+                    return false;
+                }
+            }
+        }
+        if (result) {
+            function.setFlags(flags);
+        }
+        return result;
     }
 
     private Expression readKeywordFunction(String name) {
@@ -4280,6 +4386,19 @@ public class Parser {
                 function.setParameter(0, r);
                 r = function;
             }
+        }
+        for (;;) {
+            int index = lastParseIndex;
+            if (readIf("FORMAT")) {
+                if (readIf("JSON")) {
+                    r = new Format(r, FormatEnum.JSON);
+                    continue;
+                } else {
+                    parseIndex = index;
+                    read();
+                }
+            }
+            break;
         }
         return r;
     }
@@ -7602,12 +7721,7 @@ public class Parser {
                 return command;
             } else if (readIf("RESTART")) {
                 readIf(WITH);
-                Expression start = readExpression();
-                AlterSequence command = new AlterSequence(session, schema);
-                command.setColumn(column);
-                SequenceOptions options = new SequenceOptions();
-                options.setStartValue(start);
-                command.setOptions(options);
+                AlterSequence command = readAlterColumnRestartWith(schema, column);
                 return commandIfTableExists(schema, tableName, ifTableExists, command);
             } else if (readIf("SELECTIVITY")) {
                 AlterTableAlterColumn command = new AlterTableAlterColumn(
@@ -7621,8 +7735,34 @@ public class Parser {
             } else {
                 return parseAlterTableAlterColumnType(schema, tableName, columnName, ifTableExists);
             }
+        } else if (database.getMode().getEnum() == ModeEnum.MySQL && readIf("AUTO_INCREMENT")) {
+            readIf(EQUAL);
+            Table table = tableIfTableExists(schema, tableName, ifTableExists);
+            if (table == null) {
+                return new NoOperation(session);
+            }
+            Index idx = table.findPrimaryKey();
+            if (idx != null) {
+                for (IndexColumn ic : idx.getIndexColumns()) {
+                    Column column = ic.column;
+                    if (column.getSequence() != null) {
+                        return readAlterColumnRestartWith(schema, column);
+                    }
+                }
+            }
+            throw DbException.get(ErrorCode.COLUMN_NOT_FOUND_1, "AUTO_INCREMENT PRIMARY KEY");
         }
         throw getSyntaxError();
+    }
+
+    private AlterSequence readAlterColumnRestartWith(Schema schema, Column column) {
+        Expression start = readExpression();
+        AlterSequence command = new AlterSequence(session, schema);
+        command.setColumn(column);
+        SequenceOptions options = new SequenceOptions();
+        options.setStartValue(start);
+        command.setOptions(options);
+        return command;
     }
 
     private Table tableIfTableExists(Schema schema, String tableName, boolean ifTableExists) {
@@ -7967,45 +8107,14 @@ public class Parser {
                 } while (readIfMore(false));
             }
         }
-        // Allows "COMMENT='comment'" in DDL statements (MySQL syntax)
-        if (readIf("COMMENT")) {
-            if (readIf(EQUAL)) {
-                // read the complete string comment, but nothing with it for now
-                readString();
-            }
+        if (database.getMode().getEnum() == ModeEnum.MySQL) {
+            parseCreateTableMySQLTableOptions(command);
         }
         if (readIf("ENGINE")) {
-            if (readIf(EQUAL)) {
-                // map MySQL engine types onto H2 behavior
-                String tableEngine = readUniqueIdentifier();
-                if ("InnoDb".equalsIgnoreCase(tableEngine)) {
-                    // ok
-                } else if (!"MyISAM".equalsIgnoreCase(tableEngine)) {
-                    throw DbException.getUnsupportedException(tableEngine);
-                }
-            } else {
-                command.setTableEngine(readUniqueIdentifier());
-            }
+            command.setTableEngine(readUniqueIdentifier());
         }
         if (readIf(WITH)) {
             command.setTableEngineParams(readTableEngineParams());
-        }
-        // MySQL compatibility
-        if (readIf("AUTO_INCREMENT")) {
-            read(EQUAL);
-            if (currentTokenType != VALUE ||
-                    currentValue.getValueType() != Value.INT) {
-                throw DbException.getSyntaxError(sqlCommand, parseIndex,
-                        "integer");
-            }
-            read();
-        }
-        readIf("DEFAULT");
-        if (readIf("CHARSET")) {
-            read(EQUAL);
-            if (!readIf("UTF8")) {
-                read("UTF8MB4");
-            }
         }
         if (temp) {
             if (readIf(ON)) {
@@ -8041,12 +8150,6 @@ public class Parser {
             if (readIf(WITH)) {
                 command.setWithNoData(readIf("NO"));
                 read("DATA");
-            }
-        }
-        // for MySQL compatibility
-        if (readIf("ROW_FORMAT")) {
-            if (readIf(EQUAL)) {
-                readColumnIdentifier();
             }
         }
         return command;
@@ -8154,6 +8257,67 @@ public class Parser {
                 parseReferences(ref, schema, tableName);
                 command.addConstraintCommand(ref);
             }
+        }
+    }
+
+    private void parseCreateTableMySQLTableOptions(CreateTable command) {
+        boolean requireNext = false;
+        for (;;) {
+            if (readIf("AUTO_INCREMENT")) {
+                readIf(EQUAL);
+                Expression value = readExpression();
+                set: {
+                    AlterTableAddConstraint primaryKey = command.getPrimaryKey();
+                    if (primaryKey != null) {
+                        for (IndexColumn ic : primaryKey.getIndexColumns()) {
+                            String columnName = ic.columnName;
+                            for (Column column : command.getColumns()) {
+                                if (database.equalsIdentifiers(column.getName(), columnName)) {
+                                    SequenceOptions options = column.getAutoIncrementOptions();
+                                    if (options != null) {
+                                        options.setStartValue(value);
+                                        break set;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    throw DbException.get(ErrorCode.COLUMN_NOT_FOUND_1, "AUTO_INCREMENT PRIMARY KEY");
+                }
+            } else if (readIf("DEFAULT")) {
+                if (readIf("CHARACTER")) {
+                    read("SET");
+                } else {
+                    read("CHARSET");
+                }
+                readMySQLCharset();
+            } else if (readIf("CHARACTER")) {
+                read("SET");
+                readMySQLCharset();
+            } else if (readIf("CHARSET")) {
+                readMySQLCharset();
+            } else if (readIf("COMMENT")) {
+                readIf(EQUAL);
+                command.setComment(readString());
+            } else if (readIf("ENGINE")) {
+                readIf(EQUAL);
+                readUniqueIdentifier();
+            } else if (readIf("ROW_FORMAT")) {
+                readIf(EQUAL);
+                readColumnIdentifier();
+            } else if (requireNext) {
+                throw getSyntaxError();
+            } else {
+                break;
+            }
+            requireNext = readIf(COMMA);
+        }
+    }
+
+    private void readMySQLCharset() {
+        readIf(EQUAL);
+        if (!readIf("UTF8")) {
+            read("UTF8MB4");
         }
     }
 
