@@ -378,78 +378,12 @@ public class TableView extends Table {
 
     @Override
     public void removeRow(Session session, Row row) {
-        if (tables.size() > 1)
-            throw DbException.getUnsupportedException("VIEW");
-
-        if (tables.size() == 1) {
-            Table baseTable = tables.get(0);
-
-            StringBuilder crudeDelete = new StringBuilder("DELETE FROM ")
-                    .append(baseTable.getSchema().getName())
-                    .append(".")
-                    .append(baseTable.getName())
-                    .append(" WHERE ");
-
-            ArrayList<Expression> expressions = viewQuery.getExpressions();
-            for (int i = 0; i < expressions.size(); i++) {
-                Expression expression = expressions.get(i);
-                Expression nonAliasExpression = expression.getNonAliasExpression();
-                String baseTableColumnName = nonAliasExpression.getColumnName();
-                Value value = row.getValueList()[i];
-                crudeDelete.append(baseTableColumnName).append(value.containsNull() ? " IS " : " = ")
-                        .append(value).append(i == expressions.size() - 1 ? "" : " AND ");
-            }
-            crudeDelete.append(" LIMIT 1");
-
-            String sql = crudeDelete.toString();
-
-            Delete command = (Delete) session.prepare(sql);
-
-            int update = command.update();
-
-            if (update == 0) {
-                throw DbException.convert(new IllegalStateException(format("Update updated 0 rows! %s.%s - %s", getSchema().getName(), getName(), sql)));
-            }
-        }
+        throw DbException.getUnsupportedException("VIEW");
     }
 
     @Override
     public void addRow(Session session, Row row) {
-        if (tables.size() > 1)
-            throw DbException.getUnsupportedException("VIEW");
-
-        if (tables.size() == 1) {
-            Table baseTable = tables.get(0);
-
-            StringBuilder crudeUpdateColumns = new StringBuilder("INSERT INTO ")
-                    .append(baseTable.getSchema().getName())
-                    .append(".")
-                    .append(baseTable.getName())
-                    .append(" (");
-
-            StringBuilder crudeUpdateValue = new StringBuilder(") VALUES (");
-
-            ArrayList<Expression> expressions = viewQuery.getExpressions();
-            for (int i = 0; i < expressions.size(); i++) {
-                Expression expression = expressions.get(i);
-                Expression nonAliasExpression = expression.getNonAliasExpression();
-                String baseTableColumnName = nonAliasExpression.getColumnName();
-                crudeUpdateColumns.append(baseTableColumnName).append(i == expressions.size() - 1 ? "" : ", ");
-                crudeUpdateValue.append(row.getValueList()[i]).append(i == expressions.size() - 1 ? "" : ", ");
-            }
-            crudeUpdateValue.append(')');
-
-            String sql = format("%s%s", crudeUpdateColumns, crudeUpdateValue);
-
-            Insert command = (Insert) session.prepare(sql);
-
-            int updated = command.update();
-
-            if (updated == 0) {
-                throw DbException.convert(new IllegalStateException(format("Insert updated 0 rows! %s.%s - %s", getSchema().getName(), getName(), sql)));
-            }
-        }
-
+        throw DbException.getUnsupportedException("VIEW");
     }
 
     @Override
