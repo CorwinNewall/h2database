@@ -107,7 +107,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
             INSERT = 57, INSTR = 58, LCASE = 59, LEFT = 60, LENGTH = 61,
             LOCATE = 62, LTRIM = 63, OCTET_LENGTH = 64, RAWTOHEX = 65,
             REPEAT = 66, REPLACE = 67, RIGHT = 68, RTRIM = 69, SOUNDEX = 70,
-            SPACE = 71, SUBSTR = 72, SUBSTRING = 73, UCASE = 74, LOWER = 75,
+            SPACE = 71, /* 72 */ SUBSTRING = 73, UCASE = 74, LOWER = 75,
             UPPER = 76, POSITION = 77, TRIM = 78, STRINGENCODE = 79,
             STRINGDECODE = 80, STRINGTOUTF8 = 81, UTF8TOSTRING = 82,
             XMLATTR = 83, XMLNODE = 84, XMLCOMMENT = 85, XMLCDATA = 86,
@@ -117,7 +117,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
 
     public static final int CURRENT_DATE = 100, CURRENT_TIME = 101, LOCALTIME = 102,
             CURRENT_TIMESTAMP = 103, LOCALTIMESTAMP = 104,
-            DATE_ADD = 105, DATE_DIFF = 106, DAY_NAME = 107, DAY_OF_MONTH = 108,
+            DATEADD = 105, DATEDIFF = 106, DAY_NAME = 107, DAY_OF_MONTH = 108,
             DAY_OF_WEEK = 109, DAY_OF_YEAR = 110, HOUR = 111, MINUTE = 112,
             MONTH = 113, MONTH_NAME = 114, QUARTER = 115,
             SECOND = 116, WEEK = 117, YEAR = 118, EXTRACT = 119,
@@ -164,6 +164,8 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
      */
     public static final int H2VERSION = 231;
 
+    private static final int COUNT = JSON_ARRAY + 1;
+
     /**
      * The flag for TRIM(LEADING ...) function.
      */
@@ -186,7 +188,8 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
 
     protected static final int VAR_ARGS = -1;
 
-    private static final HashMap<String, FunctionInfo> FUNCTIONS = new HashMap<>(256);
+    private static final FunctionInfo[] FUNCTIONS_BY_ID = new FunctionInfo[COUNT];
+    private static final HashMap<String, FunctionInfo> FUNCTIONS_BY_NAME = new HashMap<>(256);
     private static final char[] SOUNDEX_INDEX = new char[128];
 
     protected Expression[] args;
@@ -296,8 +299,8 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         addFunction("RTRIM", RTRIM, VAR_ARGS, Value.STRING);
         addFunction("SOUNDEX", SOUNDEX, 1, Value.STRING);
         addFunction("SPACE", SPACE, 1, Value.STRING);
-        addFunction("SUBSTR", SUBSTR, VAR_ARGS, Value.STRING);
-        addFunction("SUBSTRING", SUBSTRING, VAR_ARGS, Value.STRING);
+        addFunction("SUBSTR", SUBSTRING, VAR_ARGS, Value.NULL);
+        addFunction("SUBSTRING", SUBSTRING, VAR_ARGS, Value.NULL);
         addFunction("UCASE", UCASE, 1, Value.STRING);
         addFunction("LOWER", LOWER, 1, Value.STRING);
         addFunction("UPPER", UPPER, 1, Value.STRING);
@@ -326,7 +329,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         addFunctionNotDeterministic("SYSDATE", CURRENT_DATE, 0, Value.DATE, false);
         addFunctionNotDeterministic("TODAY", CURRENT_DATE, 0, Value.DATE, false);
 
-        addFunctionNotDeterministic("CURRENT_TIME", CURRENT_TIME, VAR_ARGS, Value.TIME);
+        addFunctionNotDeterministic("CURRENT_TIME", CURRENT_TIME, VAR_ARGS, Value.TIME, false);
 
         addFunctionNotDeterministic("LOCALTIME", LOCALTIME, VAR_ARGS, Value.TIME, false);
         addFunctionNotDeterministic("SYSTIME", LOCALTIME, 0, Value.TIME, false);
@@ -342,14 +345,10 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         addFunction("TO_TIMESTAMP", TO_TIMESTAMP, VAR_ARGS, Value.TIMESTAMP);
         addFunction("ADD_MONTHS", ADD_MONTHS, 2, Value.TIMESTAMP);
         addFunction("TO_TIMESTAMP_TZ", TO_TIMESTAMP_TZ, VAR_ARGS, Value.TIMESTAMP_TZ);
-        addFunction("DATEADD", DATE_ADD,
-                3, Value.TIMESTAMP);
-        addFunction("TIMESTAMPADD", DATE_ADD,
-                3, Value.TIMESTAMP);
-        addFunction("DATEDIFF", DATE_DIFF,
-                3, Value.LONG);
-        addFunction("TIMESTAMPDIFF", DATE_DIFF,
-                3, Value.LONG);
+        addFunction("DATEADD", DATEADD, 3, Value.TIMESTAMP);
+        addFunction("TIMESTAMPADD", DATEADD, 3, Value.TIMESTAMP);
+        addFunction("DATEDIFF", DATEDIFF, 3, Value.LONG);
+        addFunction("TIMESTAMPDIFF", DATEDIFF, 3, Value.LONG);
         addFunction("DAYNAME", DAY_NAME,
                 1, Value.STRING);
         addFunction("DAYNAME", DAY_NAME,
@@ -523,8 +522,12 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
     private static void addFunction(String name, int type, int parameterCount,
             int returnDataType, boolean nullIfParameterIsNull, boolean deterministic,
             boolean bufferResultSetToLocalTemp, boolean requireParentheses, boolean specialArguments) {
-        FUNCTIONS.put(name, new FunctionInfo(name, type, parameterCount, returnDataType, nullIfParameterIsNull,
-                deterministic, bufferResultSetToLocalTemp, requireParentheses, specialArguments));
+        FunctionInfo info = new FunctionInfo(name, type, parameterCount, returnDataType, nullIfParameterIsNull,
+                deterministic, bufferResultSetToLocalTemp, requireParentheses, specialArguments);
+        if (FUNCTIONS_BY_ID[type] == null) {
+            FUNCTIONS_BY_ID[type] = info;
+        }
+        FUNCTIONS_BY_NAME.put(name, info);
     }
 
     private static void addFunctionNotDeterministic(String name, int type,
@@ -549,6 +552,17 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
 
     /**
      * Get an instance of the given function for this database.
+     *
+     * @param database the database
+     * @param id the function number
+     * @return the function object
+     */
+    public static Function getFunction(Database database, int id) {
+        return createFunction(database, FUNCTIONS_BY_ID[id]);
+    }
+
+    /**
+     * Get an instance of the given function for this database.
      * If no function with this name is found, null is returned.
      *
      * @param database the database
@@ -560,7 +574,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
             // if not yet converted to uppercase, do it now
             name = StringUtils.toUpperEnglish(name);
         }
-        FunctionInfo info = FUNCTIONS.get(name);
+        FunctionInfo info = FUNCTIONS_BY_NAME.get(name);
         if (info == null) {
             switch (database.getMode().getEnum()) {
             case MSSQLServer:
@@ -571,6 +585,10 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
                 return null;
             }
         }
+        return createFunction(database, info);
+    }
+
+    private static Function createFunction(Database database, FunctionInfo info) {
         switch (info.type) {
         case TABLE:
         case TABLE_DISTINCT:
@@ -588,7 +606,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
      * @return the function information or {@code null}
      */
     public static FunctionInfo getFunctionInfo(String upperName) {
-        return FUNCTIONS.get(upperName);
+        return FUNCTIONS_BY_NAME.get(upperName);
     }
 
     /**
@@ -1412,18 +1430,9 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
                     false, true, v1 == null ? " " : v1.getString()),
                     database.getMode().treatEmptyStringsAsNull);
             break;
-        case SUBSTR:
-        case SUBSTRING: {
-            String s = v0.getString();
-            int offset = v1.getInt();
-            if (offset < 0) {
-                offset = s.length() + offset + 1;
-            }
-            int length = v2 == null ? s.length() : v2.getInt();
-            result = ValueString.get(substring(s, offset, length),
-                    database.getMode().treatEmptyStringsAsNull);
+        case SUBSTRING:
+            result = substring(v0, v1, v2);
             break;
-        }
         case POSITION:
             result = ValueInt.get(locate(v0.getString(), v1.getString(), 0));
             break;
@@ -1517,10 +1526,10 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
             result = ValueString.get(Constants.getVersion(),
                     database.getMode().treatEmptyStringsAsNull);
             break;
-        case DATE_ADD:
+        case DATEADD:
             result = DateTimeFunctions.dateadd(v0.getString(), v1.getLong(), v2);
             break;
-        case DATE_DIFF:
+        case DATEDIFF:
             result = ValueLong.get(DateTimeFunctions.datediff(v0.getString(), v1, v2));
             break;
         case DATE_TRUNC:
@@ -1889,20 +1898,51 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         return ValueBytes.getNoCopy(b);
     }
 
-    private static String substring(String s, int start, int length) {
-        int len = s.length();
-        start--;
-        if (start < 0) {
-            start = 0;
+    private Value substring(Value stringValue, Value startValue, Value lengthValue) {
+        if (type.getValueType() == Value.BYTES) {
+            byte[] s = stringValue.getBytesNoCopy();
+            int sl = s.length;
+            int start = startValue.getInt();
+            // These compatibility conditions violate the Standard
+            if (start == 0) {
+                start = 1;
+            } else if (start < 0) {
+                start = sl + start + 1;
+            }
+            int end = lengthValue == null ? Math.max(sl + 1, start) : start + lengthValue.getInt();
+            // SQL Standard requires "data exception - substring error" when
+            // end < start but H2 does not throw it for compatibility
+            start = Math.max(start, 1);
+            end = Math.min(end, sl + 1);
+            if (start > sl || end <= start) {
+                return ValueBytes.EMPTY;
+            }
+            start--;
+            end--;
+            if (start == 0 && end == s.length) {
+                return stringValue.convertTo(Value.BYTES);
+            }
+            return ValueBytes.getNoCopy(Arrays.copyOfRange(s, start, end));
+        } else {
+            String s = stringValue.getString();
+            int sl = s.length();
+            int start = startValue.getInt();
+            // These compatibility conditions violate the Standard
+            if (start == 0) {
+                start = 1;
+            } else if (start < 0) {
+                start = sl + start + 1;
+            }
+            int end = lengthValue == null ? Math.max(sl + 1, start) : start + lengthValue.getInt();
+            // SQL Standard requires "data exception - substring error" when
+            // end < start but H2 does not throw it for compatibility
+            start = Math.max(start, 1);
+            end = Math.min(end, sl + 1);
+            if (start > sl || end <= start) {
+                return database.getMode().treatEmptyStringsAsNull ? ValueNull.INSTANCE : ValueString.EMPTY;
+            }
+            return ValueString.get(s.substring(start - 1, end - 1), false);
         }
-        if (length < 0) {
-            length = 0;
-        }
-        start = (start > len) ? len : start;
-        if (start + length > len) {
-            length = len - start;
-        }
-        return s.substring(start, start + length);
     }
 
     private static String repeat(String s, int count) {
@@ -2407,7 +2447,6 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         case REPLACE:
         case LOCATE:
         case INSTR:
-        case SUBSTR:
         case SUBSTRING:
         case LPAD:
         case RPAD:
@@ -2477,8 +2516,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         }
     }
 
-    public void setDataType(Column col) {
-        TypeInfo type = col.getType();
+    public void setDataType(TypeInfo type) {
         this.type = type;
     }
 
@@ -2499,7 +2537,7 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
         TypeInfo typeInfo;
         Expression p0 = args.length < 1 ? null : args[0];
         switch (info.type) {
-        case DATE_ADD: {
+        case DATEADD: {
             typeInfo = TypeInfo.TYPE_TIMESTAMP;
             if (p0.isConstant()) {
                 Expression p2 = args[2];
@@ -2665,9 +2703,9 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
             }
             break;
         }
-        case SUBSTRING:
-        case SUBSTR: {
-            long p = args[0].getType().getPrecision();
+        case SUBSTRING: {
+            TypeInfo argType = args[0].getType();
+            long p = argType.getPrecision();
             if (args[1].isConstant()) {
                 // if only two arguments are used,
                 // subtract offset from first argument length
@@ -2678,7 +2716,8 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
                 p = Math.min(p, args[2].getValue(session).getLong());
             }
             p = Math.max(0, p);
-            typeInfo = TypeInfo.getTypeInfo(info.returnDataType, p, 0, null);
+            typeInfo = TypeInfo.getTypeInfo(DataType.isBinaryStringType(argType.getValueType())
+                    ? Value.BYTES : Value.STRING, p, 0, null);
             break;
         }
         case ENCRYPT:
@@ -2785,6 +2824,15 @@ public class Function extends Expression implements FunctionCall, ExpressionWith
             builder.append('(');
         }
         switch (info.type) {
+        case SUBSTRING: {
+            args[0].getSQL(builder, alwaysQuote).append(" FROM ");
+            args[1].getSQL(builder, alwaysQuote);
+            if (args.length > 2) {
+                builder.append(" FOR ");
+                args[2].getSQL(builder, alwaysQuote);
+            }
+            break;
+        }
         case TRIM: {
             switch (flags) {
             case TRIM_LEADING:

@@ -64,6 +64,7 @@ import static org.h2.util.ParserUtil.WINDOW;
 import static org.h2.util.ParserUtil.WITH;
 import static org.h2.util.ParserUtil._ROWID_;
 
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.Charset;
@@ -167,12 +168,13 @@ import org.h2.engine.UserAggregate;
 import org.h2.expression.Alias;
 import org.h2.expression.BinaryOperation;
 import org.h2.expression.BinaryOperation.OpType;
-import org.h2.expression.Format.FormatEnum;
+import org.h2.expression.ConcatenationOperation;
 import org.h2.expression.Expression;
 import org.h2.expression.ExpressionColumn;
 import org.h2.expression.ExpressionList;
 import org.h2.expression.ExpressionWithFlags;
 import org.h2.expression.Format;
+import org.h2.expression.Format.FormatEnum;
 import org.h2.expression.Parameter;
 import org.h2.expression.Rownum;
 import org.h2.expression.SequenceValue;
@@ -203,6 +205,7 @@ import org.h2.expression.condition.ConditionInParameter;
 import org.h2.expression.condition.ConditionInSelect;
 import org.h2.expression.condition.ConditionNot;
 import org.h2.expression.condition.IsJsonPredicate;
+import org.h2.expression.condition.TypePredicate;
 import org.h2.expression.function.Function;
 import org.h2.expression.function.FunctionCall;
 import org.h2.expression.function.JavaFunction;
@@ -269,7 +272,7 @@ public class Parser {
     private static final int CHAR_STRING = 7, CHAR_DOT = 8,
             CHAR_DOLLAR_QUOTED_STRING = 9;
 
-    // this are token types, see also types in ParserUtil
+    // these are token types, see also types in ParserUtil
 
     /**
      * Token with parameter.
@@ -829,8 +832,13 @@ public class Parser {
             if (currentTokenQuoted) {
                 break;
             }
-            switch (currentToken.charAt(0)) {
-            case 'a':
+            /*
+             * Convert a-z to A-Z. This method is safe, because only A-Z
+             * characters are considered below.
+             *
+             * Unquoted identifier is never empty.
+             */
+            switch (currentToken.charAt(0) & 0xffdf) {
             case 'A':
                 if (readIf("ALTER")) {
                     c = parseAlter();
@@ -838,7 +846,6 @@ public class Parser {
                     c = parseAnalyze();
                 }
                 break;
-            case 'b':
             case 'B':
                 if (readIf("BACKUP")) {
                     c = parseBackup();
@@ -846,7 +853,6 @@ public class Parser {
                     c = parseBegin();
                 }
                 break;
-            case 'c':
             case 'C':
                 if (readIf("COMMIT")) {
                     c = parseCommit();
@@ -860,7 +866,6 @@ public class Parser {
                     c = parseComment();
                 }
                 break;
-            case 'd':
             case 'D':
                 if (readIf("DELETE")) {
                     c = parseDelete();
@@ -878,7 +883,6 @@ public class Parser {
                     c = parseDeallocate();
                 }
                 break;
-            case 'e':
             case 'E':
                 if (readIf("EXPLAIN")) {
                     c = parseExplain();
@@ -892,31 +896,26 @@ public class Parser {
                     }
                 }
                 break;
-            case 'g':
             case 'G':
                 if (readIf("GRANT")) {
                     c = parseGrantRevoke(CommandInterface.GRANT);
                 }
                 break;
-            case 'h':
             case 'H':
                 if (readIf("HELP")) {
                     c = parseHelp();
                 }
                 break;
-            case 'i':
             case 'I':
                 if (readIf("INSERT")) {
                     c = parseInsert();
                 }
                 break;
-            case 'm':
             case 'M':
                 if (readIf("MERGE")) {
                     c = parseMerge();
                 }
                 break;
-            case 'p':
             case 'P':
                 if (database.getMode().getEnum() != ModeEnum.MSSQLServer && readIf("PREPARE")) {
                     /*
@@ -927,7 +926,6 @@ public class Parser {
                     c = parsePrepare();
                 }
                 break;
-            case 'r':
             case 'R':
                 if (readIf("ROLLBACK")) {
                     c = parseRollback();
@@ -941,7 +939,6 @@ public class Parser {
                     c = parseReplace();
                 }
                 break;
-            case 's':
             case 'S':
                 if (readIf("SET")) {
                     c = parseSet();
@@ -955,13 +952,11 @@ public class Parser {
                     c = parseShow();
                 }
                 break;
-            case 't':
             case 'T':
                 if (readIf("TRUNCATE")) {
                     c = parseTruncate();
                 }
                 break;
-            case 'u':
             case 'U':
                 if (readIf("UPDATE")) {
                     c = parseUpdate();
@@ -1279,7 +1274,7 @@ public class Parser {
                 } else {
                     for (int i = 0; i < columnCount; i++) {
                         Column column = columns.get(i);
-                        Function f = Function.getFunction(database, "ARRAY_GET");
+                        Function f = Function.getFunction(database, Function.ARRAY_GET);
                         f.setParameter(0, expression);
                         f.setParameter(1, ValueExpression.get(ValueInt.get(i + 1)));
                         f.doneWithParameters();
@@ -1436,7 +1431,7 @@ public class Parser {
         String informationSchema = database.sysIdentifier("INFORMATION_SCHEMA");
         Table table = database.getSchema(informationSchema)
                 .resolveTableOrView(session, database.sysIdentifier("HELP"));
-        Function function = Function.getFunction(database, "UPPER");
+        Function function = Function.getFunction(database, Function.UPPER);
         function.setParameter(0, new ExpressionColumn(database, informationSchema,
                 database.sysIdentifier("HELP"), database.sysIdentifier("TOPIC"), false));
         function.doneWithParameters();
@@ -1886,7 +1881,8 @@ public class Parser {
             table = parseValuesTable(0).getTable();
         } else if (readIf(TABLE)) {
             read(OPEN_PAREN);
-            table = readTableFunction("TABLE", null, database.getMainSchema());
+            Function function = readFunctionParameters(Function.getFunction(database, Function.TABLE));
+            table = new FunctionTable(database.getMainSchema(), session, function, function);
         } else {
             String tableName = readIdentifierWithSchema(null);
             Schema schema;
@@ -3002,8 +2998,8 @@ public class Parser {
                 recompileAlways = true;
                 r = new CompareLike(database, r, b, esc, false);
             } else if (readIf("ILIKE")) {
-                Function function = Function.getFunction(database, "CAST");
-                function.setDataType(new Column("X", Value.STRING_IGNORECASE));
+                Function function = Function.getFunction(database, Function.CAST);
+                function.setDataType(TypeInfo.TYPE_STRING_IGNORECASE);
                 function.setParameter(0, r);
                 r = function;
                 Expression b = readConcat();
@@ -3026,6 +3022,8 @@ public class Parser {
                         read(FROM);
                         r = new Comparison(session, Comparison.EQUAL_NULL_SAFE,
                                 r, readConcat());
+                    } else if (readIf("OF")) {
+                        r = readTypePredicate(r, true);
                     } else if (readIf("JSON")) {
                         r = readJsonPredicate(r, true);
                     } else {
@@ -3038,6 +3036,8 @@ public class Parser {
                     read(FROM);
                     r = new Comparison(session, Comparison.NOT_EQUAL_NULL_SAFE,
                             r, readConcat());
+                } else if (readIf("OF")) {
+                    r = readTypePredicate(r, false);
                 } else if (readIf("JSON")) {
                     r = readJsonPredicate(r, false);
                 } else {
@@ -3130,7 +3130,16 @@ public class Parser {
         return r;
     }
 
-    private Expression readJsonPredicate(Expression r, boolean not) {
+    private TypePredicate readTypePredicate(Expression r, boolean not) {
+        read(OPEN_PAREN);
+        ArrayList<TypeInfo> typeList = Utils.newSmallArrayList();
+        do {
+            typeList.add(parseColumnWithType(null, false).getType());
+        } while (readIfMore(true));
+        return new TypePredicate(r, not, typeList.toArray(new TypeInfo[0]));
+    }
+
+    private IsJsonPredicate readJsonPredicate(Expression r, boolean not) {
         JSONItemType itemType;
         if (readIf("VALUE")) {
             itemType = JSONItemType.VALUE;
@@ -3159,21 +3168,19 @@ public class Parser {
         Expression r = readSum();
         while (true) {
             if (readIf(CONCATENATION)) {
-                r = new BinaryOperation(OpType.CONCAT, r, readSum());
+                r = new ConcatenationOperation(r, readSum());
             } else if (readIf(TILDE)) {
                 if (readIf(ASTERISK)) {
-                    Function function = Function.getFunction(database, "CAST");
-                    function.setDataType(new Column("X",
-                            Value.STRING_IGNORECASE));
+                    Function function = Function.getFunction(database, Function.CAST);
+                    function.setDataType(TypeInfo.TYPE_STRING_IGNORECASE);
                     function.setParameter(0, r);
                     r = function;
                 }
                 r = new CompareLike(database, r, readSum(), null, true);
             } else if (readIf(NOT_TILDE)) {
                 if (readIf(ASTERISK)) {
-                    Function function = Function.getFunction(database, "CAST");
-                    function.setDataType(new Column("X",
-                            Value.STRING_IGNORECASE));
+                    Function function = Function.getFunction(database, Function.CAST);
+                    function.setDataType(TypeInfo.TYPE_STRING_IGNORECASE);
                     function.setParameter(0, r);
                     r = function;
                 }
@@ -3417,8 +3424,7 @@ public class Parser {
         if (schema != null) {
             functionAlias = schema.findFunction(functionName);
         } else {
-            functionAlias = findFunctionAlias(session.getCurrentSchemaName(),
-                    functionName);
+            functionAlias = findFunctionAlias(session.getCurrentSchemaName(), functionName);
         }
         if (functionAlias == null) {
             if (throwIfNotFound) {
@@ -3427,15 +3433,13 @@ public class Parser {
                 return null;
             }
         }
-        Expression[] args;
         ArrayList<Expression> argList = Utils.newSmallArrayList();
         if (!readIf(CLOSE_PAREN)) {
             do {
                 argList.add(readExpression());
             } while (readIfMore(true));
         }
-        args = argList.toArray(new Expression[0]);
-        return new JavaFunction(functionAlias, args);
+        return new JavaFunction(functionAlias, argList.toArray(new Expression[0]));
     }
 
     private JavaAggregate readJavaAggregate(UserAggregate aggregate) {
@@ -3631,27 +3635,28 @@ public class Parser {
             }
             return readJavaFunction(null, name, true);
         }
+        return readFunctionParameters(function);
+    }
+
+    private Function readFunctionParameters(Function function) {
         switch (function.getFunctionType()) {
         case Function.CAST: {
             function.setParameter(0, readExpression());
             read("AS");
-            Column type = parseColumnWithType(null, false);
-            function.setDataType(type);
+            function.setDataType(parseColumnWithType(null, false).getType());
             read(CLOSE_PAREN);
             break;
         }
         case Function.CONVERT: {
             if (database.getMode().swapConvertFunctionParameters) {
-                Column type = parseColumnWithType(null, false);
-                function.setDataType(type);
+                function.setDataType(parseColumnWithType(null, false).getType());
                 read(COMMA);
                 function.setParameter(0, readExpression());
                 read(CLOSE_PAREN);
             } else {
                 function.setParameter(0, readExpression());
                 read(COMMA);
-                Column type = parseColumnWithType(null, false);
-                function.setDataType(type);
+                function.setDataType(parseColumnWithType(null, false).getType());
                 read(CLOSE_PAREN);
             }
             break;
@@ -3664,8 +3669,8 @@ public class Parser {
             read(CLOSE_PAREN);
             break;
         }
-        case Function.DATE_ADD:
-        case Function.DATE_DIFF: {
+        case Function.DATEADD:
+        case Function.DATEDIFF: {
             if (currentTokenType == VALUE) {
                 function.setParameter(0, ValueExpression.get(currentValue.convertTo(Value.STRING)));
             } else {
@@ -3680,11 +3685,12 @@ public class Parser {
             break;
         }
         case Function.SUBSTRING: {
-            // Different variants include:
+            // Standard variants are:
+            // SUBSTRING(X FROM 1)
+            // SUBSTRING(X FROM 1 FOR 1)
+            // Different non-standard variants include:
             // SUBSTRING(X,1)
             // SUBSTRING(X,1,1)
-            // SUBSTRING(X FROM 1 FOR 1) -- Postgres
-            // SUBSTRING(X FROM 1) -- Postgres
             // SUBSTRING(X FOR 1) -- Postgres
             function.setParameter(0, readExpression());
             if (readIf(FROM)) {
@@ -3876,15 +3882,14 @@ public class Parser {
         }
         read(CLOSE_PAREN);
         WindowFunction function = new WindowFunction(type, currentSelect, args);
-        if (type == WindowFunctionType.NTH_VALUE) {
-            readFromFirstOrLast(function);
-        }
         switch (type) {
+        case NTH_VALUE:
+            readFromFirstOrLast(function);
+            //$FALL-THROUGH$
         case LEAD:
         case LAG:
         case FIRST_VALUE:
         case LAST_VALUE:
-        case NTH_VALUE:
             readRespectOrIgnoreNulls(function);
             //$FALL-THROUGH$
         default:
@@ -3961,22 +3966,32 @@ public class Parser {
         return result;
     }
 
-    private Expression readKeywordFunction(String name) {
+    private Expression readKeywordFunction(int id) {
+        Function function = Function.getFunction(database, id);
         if (readIf(OPEN_PAREN)) {
-            return readFunction(null, name);
+            readFunctionParameters(function);
         } else {
-            return readFunctionWithoutParameters(name);
+            function.doneWithParameters();
         }
+        if (database.isAllowBuiltinAliasOverride()) {
+            FunctionAlias functionAlias = database.getSchema(session.getCurrentSchemaName()).findFunction(
+                    function.getName());
+            if (functionAlias != null) {
+                return new JavaFunction(functionAlias, function.getArgs());
+            }
+        }
+        return function;
     }
 
-    private Expression readFunctionWithoutParameters(String name) {
+    private Expression readFunctionWithoutParameters(int id) {
+        Function function = Function.getFunction(database, id);
         if (database.isAllowBuiltinAliasOverride()) {
-            FunctionAlias functionAlias = database.getSchema(session.getCurrentSchemaName()).findFunction(name);
+            FunctionAlias functionAlias = database.getSchema(session.getCurrentSchemaName()).findFunction(
+                    function.getName());
             if (functionAlias != null) {
                 return new JavaFunction(functionAlias, new Expression[0]);
             }
         }
-        Function function = Function.getFunction(database, name);
         function.doneWithParameters();
         return function;
     }
@@ -3999,7 +4014,7 @@ public class Parser {
         } else if (readIf("CURRVAL")) {
             Sequence sequence = findSequence(schema, objectName);
             if (sequence != null) {
-                Function function = Function.getFunction(database, "CURRVAL");
+                Function function = Function.getFunction(database, Function.CURRVAL);
                 function.setParameter(0, ValueExpression.get(ValueString
                         .get(sequence.getSchema().getName())));
                 function.setParameter(1, ValueExpression.get(ValueString
@@ -4140,7 +4155,7 @@ public class Parser {
             r = new Variable(session, readAliasIdentifier());
             if (readIf(COLON_EQ)) {
                 Expression value = readExpression();
-                Function function = Function.getFunction(database, "SET");
+                Function function = Function.getFunction(database, Function.SET);
                 function.setParameter(0, r);
                 function.setParameter(1, value);
                 r = function;
@@ -4158,7 +4173,7 @@ public class Parser {
             int index = lastParseIndex;
             read();
             if (readIf(OPEN_PAREN)) {
-                r = readFunction(null, "TABLE");
+                r = readFunctionParameters(Function.getFunction(database, Function.TABLE));
             } else {
                 parseIndex = index;
                 read();
@@ -4297,7 +4312,7 @@ public class Parser {
         case VALUES:
             if (database.getMode().onDuplicateKeyUpdate) {
                 read();
-                r = readKeywordFunction("VALUES");
+                r = readKeywordFunction(Function.VALUES);
             } else {
                 r = new Subquery(parseSelect());
             }
@@ -4308,33 +4323,33 @@ public class Parser {
             break;
         case CURRENT_DATE:
             read();
-            r = readKeywordFunction("CURRENT_DATE");
+            r = readKeywordFunction(Function.CURRENT_DATE);
             break;
         case CURRENT_TIME:
             read();
-            r = readKeywordFunction("CURRENT_TIME");
+            r = readKeywordFunction(Function.CURRENT_TIME);
             break;
         case CURRENT_TIMESTAMP:
             read();
-            r = readKeywordFunction("CURRENT_TIMESTAMP");
+            r = readKeywordFunction(Function.CURRENT_TIMESTAMP);
             break;
         case CURRENT_USER:
             read();
-            r = readKeywordFunction("USER");
+            r = readKeywordFunction(Function.USER);
             break;
         case LOCALTIME:
             read();
-            r = readKeywordFunction("LOCALTIME");
+            r = readKeywordFunction(Function.LOCALTIME);
             break;
         case LOCALTIMESTAMP:
             read();
-            r = readKeywordFunction("LOCALTIMESTAMP");
+            r = readKeywordFunction(Function.LOCALTIMESTAMP);
             break;
         default:
             throw getSyntaxError();
         }
         if (readIf(OPEN_BRACKET)) {
-            Function function = Function.getFunction(database, "ARRAY_GET");
+            Function function = Function.getFunction(database, Function.ARRAY_GET);
             function.setParameter(0, r);
             function.setParameter(1, readExpression());
             r = function;
@@ -4354,9 +4369,8 @@ public class Parser {
                 Expression[] args = { r };
                 r = new JavaFunction(f, args);
             } else {
-                Column col = parseColumnWithType(null, false);
-                Function function = Function.getFunction(database, "CAST");
-                function.setDataType(col);
+                Function function = Function.getFunction(database, Function.CAST);
+                function.setDataType(parseColumnWithType(null, false).getType());
                 function.setParameter(0, r);
                 r = function;
             }
@@ -4378,16 +4392,13 @@ public class Parser {
     }
 
     private Expression readTermWithIdentifier(String name) {
-        // Unquoted identifier is never empty
-        char ch = name.charAt(0);
-        if (!identifiersToUpper) {
-            /*
-             * Convert a-z to A-Z. This method is safe, because only A-Z
-             * characters are considered below.
-             */
-            ch &= 0xffdf;
-        }
-        switch (ch) {
+        /*
+         * Convert a-z to A-Z. This method is safe, because only A-Z
+         * characters are considered below.
+         *
+         * Unquoted identifier is never empty.
+         */
+        switch (name.charAt(0) & 0xffdf) {
         case 'C':
             if (database.getMode().getEnum() == ModeEnum.DB2 && equalsToken("CURRENT", name)) {
                 return parseDB2SpecialRegisters(name);
@@ -4427,11 +4438,11 @@ public class Parser {
             break;
         case 'S':
             if (equalsToken("SYSDATE", name)) {
-                return readFunctionWithoutParameters("CURRENT_TIMESTAMP");
+                return readFunctionWithoutParameters(Function.CURRENT_TIMESTAMP);
             } else if (equalsToken("SYSTIME", name)) {
-                return readFunctionWithoutParameters("CURRENT_TIME");
+                return readFunctionWithoutParameters(Function.CURRENT_TIME);
             } else if (equalsToken("SYSTIMESTAMP", name)) {
-                return readFunctionWithoutParameters("CURRENT_TIMESTAMP");
+                return readFunctionWithoutParameters(Function.CURRENT_TIMESTAMP);
             }
             break;
         case 'T':
@@ -4473,7 +4484,7 @@ public class Parser {
                     }
                 }
             } else if (equalsToken("TODAY", name)) {
-                return readFunctionWithoutParameters("CURRENT_DATE");
+                return readFunctionWithoutParameters(Function.CURRENT_DATE);
             } else if (currentTokenType == VALUE && currentValue.getValueType() == Value.STRING) {
                 if (equalsToken("T", name)) {
                     String time = currentValue.getString();
@@ -4488,9 +4499,12 @@ public class Parser {
             break;
         case 'X':
             if (currentTokenType == VALUE && currentValue.getValueType() == Value.STRING && equalsToken("X", name)) {
-                byte[] buffer = StringUtils.convertHexToBytes(currentValue.getString());
-                read();
-                return ValueExpression.get(ValueBytes.getNoCopy(buffer));
+                ByteArrayOutputStream baos = null;
+                do {
+                    baos = StringUtils.convertHexWithSpacesToBytes(baos, currentValue.getString());
+                    read();
+                } while (currentTokenType == VALUE && currentValue.getValueType() == Value.STRING);
+                return ValueExpression.get(ValueBytes.getNoCopy(baos.toByteArray()));
             }
             break;
         }
@@ -4561,14 +4575,14 @@ public class Parser {
             if (readIf(WITH)) {
                 read("TIME");
                 read("ZONE");
-                return readKeywordFunction("CURRENT_TIMESTAMP");
+                return readKeywordFunction(Function.CURRENT_TIMESTAMP);
             }
-            return readKeywordFunction("LOCALTIMESTAMP");
+            return readKeywordFunction(Function.LOCALTIMESTAMP);
         } else if (readIf("TIME")) {
             // Time with fractional seconds is not supported by DB2
-            return readFunctionWithoutParameters("CURRENT_TIME");
+            return readFunctionWithoutParameters(Function.CURRENT_TIME);
         } else if (readIf("DATE")) {
-            return readFunctionWithoutParameters("CURRENT_DATE");
+            return readFunctionWithoutParameters(Function.CURRENT_DATE);
         }
         // No match, parse CURRENT as a column
         return new ExpressionColumn(database, null, null, name, false);
@@ -4588,7 +4602,7 @@ public class Parser {
         int i;
         Function function;
         if (readIf("WHEN")) {
-            function = Function.getFunction(database, "CASE");
+            function = Function.getFunction(database, Function.CASE);
             function.setParameter(0, null);
             i = 1;
             do {
@@ -4608,7 +4622,7 @@ public class Parser {
                 readIf(CASE);
                 return elsePart;
             }
-            function = Function.getFunction(database, "CASE");
+            function = Function.getFunction(database, Function.CASE);
             function.setParameter(0, expr);
             i = 1;
             read("WHEN");
@@ -4720,12 +4734,12 @@ public class Parser {
         if (readIf(DOT)) {
             schemaName = s;
             s = readColumnIdentifier();
-        }
-        if (currentTokenType == DOT) {
-            if (equalsToken(schemaName, database.getShortName())) {
-                read();
-                schemaName = s;
-                s = readColumnIdentifier();
+            if (currentTokenType == DOT) {
+                if (equalsToken(schemaName, database.getShortName())) {
+                    read();
+                    schemaName = s;
+                    s = readColumnIdentifier();
+                }
             }
         }
         return s;
@@ -4851,9 +4865,9 @@ public class Parser {
         int[] types = characterTypes;
         lastParseIndex = parseIndex;
         int i = parseIndex;
-        int type = types[i];
-        while (type == 0) {
-            type = types[++i];
+        int type;
+        while ((type = types[i]) == 0) {
+            i++;
         }
         int start = i;
         char[] chars = sqlCommandChars;
@@ -4861,11 +4875,7 @@ public class Parser {
         currentToken = "";
         switch (type) {
         case CHAR_NAME:
-            while (true) {
-                type = types[i];
-                if (type != CHAR_NAME && type != CHAR_VALUE) {
-                    break;
-                }
+            while ((type = types[i]) == CHAR_NAME || type == CHAR_VALUE) {
                 i++;
             }
             currentTokenType = ParserUtil.getSaveTokenType(sqlCommand, !identifiersToUpper, start, i, false);
@@ -4878,21 +4888,19 @@ public class Parser {
             return;
         case CHAR_QUOTED: {
             String result = null;
-            while (true) {
-                for (int begin = i;; i++) {
-                    if (chars[i] == c) {
-                        if (result == null) {
-                            result = sqlCommand.substring(begin, i);
-                        } else {
-                            result += sqlCommand.substring(begin - 1, i);
-                        }
-                        break;
-                    }
+            for (;; i++) {
+                int begin = i;
+                while (chars[i] != c) {
+                    i++;
+                }
+                if (result == null) {
+                    result = sqlCommand.substring(begin, i);
+                } else {
+                    result += sqlCommand.substring(begin - 1, i);
                 }
                 if (chars[++i] != c) {
                     break;
                 }
-                i++;
             }
             currentToken = StringUtils.cache(result);
             parseIndex = i;
@@ -4915,35 +4923,11 @@ public class Parser {
             return;
         case CHAR_VALUE:
             if (c == '0' && (chars[i] == 'X' || chars[i] == 'x')) {
-                // hex number
-                long number = 0;
-                start += 2;
-                i++;
-                while (true) {
-                    c = chars[i];
-                    if (c >= '0' && c <= '9') {
-                        number = (number << 4) + c - '0';
-                    } else if (c >= 'A' && c <= 'F') {
-                        number = (number << 4) + c - ('A' - 10);
-                    } else if (c >= 'a' && c <= 'f') {
-                        number = (number << 4) + c - ('a' - 10);
-                    } else {
-                        checkLiterals(false);
-                        currentValue = ValueInt.get((int) number);
-                        currentTokenType = VALUE;
-                        currentToken = "0";
-                        parseIndex = i;
-                        return;
-                    }
-                    if (number > Integer.MAX_VALUE) {
-                        readHexDecimal(start, i);
-                        return;
-                    }
-                    i++;
-                }
+                readHexNumber(i + 1, start + 2, chars, types);
+                return;
             }
             long number = c - '0';
-            loop: while (true) {
+            loop: for (;; i++) {
                 c = chars[i];
                 if (c < '0' || c > '9') {
                     switch (c) {
@@ -4969,7 +4953,6 @@ public class Parser {
                     readDecimal(start, i, true);
                     break;
                 }
-                i++;
             }
             return;
         case CHAR_DOT:
@@ -4983,21 +4966,19 @@ public class Parser {
             return;
         case CHAR_STRING: {
             String result = null;
-            while (true) {
-                for (int begin = i;; i++) {
-                    if (chars[i] == '\'') {
-                        if (result == null) {
-                            result = sqlCommand.substring(begin, i);
-                        } else {
-                            result += sqlCommand.substring(begin - 1, i);
-                        }
-                        break;
-                    }
+            for (;; i++) {
+                int begin = i;
+                while (chars[i] != '\'') {
+                    i++;
+                }
+                if (result == null) {
+                    result = sqlCommand.substring(begin, i);
+                } else {
+                    result += sqlCommand.substring(begin - 1, i);
                 }
                 if (chars[++i] != '\'') {
                     break;
                 }
-                i++;
             }
             currentToken = "'";
             checkLiterals(true);
@@ -5030,26 +5011,20 @@ public class Parser {
 
     private void readParameterIndex() {
         int i = parseIndex;
-
         char[] chars = sqlCommandChars;
         char c = chars[i++];
         long number = c - '0';
-        while (true) {
-            c = chars[i];
-            if (c < '0' || c > '9') {
-                currentValue = ValueInt.get((int) number);
-                currentTokenType = VALUE;
-                currentToken = "0";
-                parseIndex = i;
-                break;
-            }
+        for (; (c = chars[i]) >= '0' && c <= '9'; i++) {
             number = number * 10 + (c - '0');
             if (number > Integer.MAX_VALUE) {
                 throw DbException.getInvalidValueException(
                         "parameter index", number);
             }
-            i++;
         }
+        currentValue = ValueInt.get((int) number);
+        currentTokenType = VALUE;
+        currentToken = "0";
+        parseIndex = i;
     }
 
     private void checkLiterals(boolean text) {
@@ -5062,32 +5037,70 @@ public class Parser {
         }
     }
 
-    private void readHexDecimal(int start, int i) {
-        char[] chars = sqlCommandChars;
-        char c;
-        do {
-            c = chars[++i];
-        } while ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
-        parseIndex = i;
-        String sub = sqlCommand.substring(start, i);
-        BigDecimal bd = new BigDecimal(new BigInteger(sub, 16));
-        checkLiterals(false);
-        currentValue = ValueDecimal.get(bd);
+    private void readHexNumber(int i, int start, char[] chars, int[] types) {
+        if (database.getMode().zeroExLiteralsAreBinaryStrings) {
+            for (char c; (c = chars[i]) >= '0' && c <= '9' || c >= 'A' && c <= 'F' || c >= 'a' && c <= 'z';) {
+                i++;
+            }
+            if (types[i] == CHAR_NAME) {
+                throw DbException.get(ErrorCode.HEX_STRING_WRONG_1, sqlCommand.substring(i, i + 1));
+            }
+            checkLiterals(true);
+            currentValue = ValueBytes.getNoCopy(StringUtils.convertHexToBytes(sqlCommand.substring(start, i)));
+            parseIndex = i;
+        } else {
+            long number = 0;
+            for (;; i++) {
+                char c = chars[i];
+                if (c >= '0' && c <= '9') {
+                    number = (number << 4) + c - '0';
+                } else if (c >= 'A' && c <= 'F') {
+                    number = (number << 4) + c - ('A' - 10);
+                } else if (c >= 'a' && c <= 'f') {
+                    number = (number << 4) + c - ('a' - 10);
+                } else if (i == start) {
+                    parseIndex = i;
+                    addExpected("Hex number");
+                    throw getSyntaxError();
+                } else {
+                    currentValue = ValueInt.get((int) number);
+                    break;
+                }
+                if (number > Integer.MAX_VALUE) {
+                    do {
+                        c = chars[++i];
+                    } while ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'));
+                    String sub = sqlCommand.substring(start, i);
+                    currentValue = ValueDecimal.get(new BigDecimal(new BigInteger(sub, 16)));
+                    break;
+                }
+            }
+            char c = chars[i];
+            if (c == 'L' || c == 'l') {
+                i++;
+            }
+            parseIndex = i;
+            if (types[i] == CHAR_NAME) {
+                addExpected("Hex number");
+                throw getSyntaxError();
+            }
+            checkLiterals(false);
+        }
         currentTokenType = VALUE;
+        currentToken = "0";
     }
 
     private void readDecimal(int start, int i, boolean integer) {
         char[] chars = sqlCommandChars;
         int[] types = characterTypes;
         // go until the first non-number
-        while (true) {
+        for (;; i++) {
             int t = types[i];
             if (t == CHAR_DOT) {
                 integer = false;
             } else if (t != CHAR_VALUE) {
                 break;
             }
-            i++;
         }
         char c = chars[i];
         if (c == 'E' || c == 'e') {
@@ -5169,11 +5182,7 @@ public class Parser {
                     // single line comment
                     changed = true;
                     startLoop = i;
-                    while (true) {
-                        c = command[i];
-                        if (c == '\n' || c == '\r' || i >= len - 1) {
-                            break;
-                        }
+                    while ((c = command[i]) != '\n' && c != '\r' && i < len - 1) {
                         command[i++] = ' ';
                         checkRunOver(i, len, startLoop);
                     }
@@ -5186,11 +5195,7 @@ public class Parser {
                     // single line comment
                     changed = true;
                     startLoop = i;
-                    while (true) {
-                        c = command[i];
-                        if (c == '\n' || c == '\r' || i >= len - 1) {
-                            break;
-                        }
+                    while ((c = command[i]) != '\n' && c != '\r' && i < len - 1) {
                         command[i++] = ' ';
                         checkRunOver(i, len, startLoop);
                     }
@@ -5943,8 +5948,11 @@ public class Parser {
         long p = readNonNegativeLong();
         if (currentTokenType == IDENTIFIER && !currentTokenQuoted && currentToken.length() == 1) {
             long mul;
-            char ch = currentToken.charAt(0);
-            switch (identifiersToUpper ? ch : Character.toUpperCase(ch)) {
+            /*
+             * Convert a-z to A-Z. This method is safe, because only A-Z
+             * characters are considered below.
+             */
+            switch (currentToken.charAt(0) & 0xffdf) {
             case 'K':
                 mul = 1L << 10;
                 break;
@@ -6200,7 +6208,7 @@ public class Parser {
 
     private TableFilter parseValuesTable(int orderInFrom) {
         Schema mainSchema = database.getMainSchema();
-        TableFunction tf = (TableFunction) Function.getFunction(database, "TABLE");
+        TableFunction tf = (TableFunction) Function.getFunction(database, Function.TABLE);
         ArrayList<Column> columns = Utils.newSmallArrayList();
         ArrayList<ArrayList<Expression>> rows = Utils.newSmallArrayList();
         do {
